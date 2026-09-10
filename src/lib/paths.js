@@ -11,13 +11,14 @@ export const THUMB_DIR = path.join(DATA_DIR, 'thumbnails');
 export const SHOT_DIR = path.join(DATA_DIR, 'screenshots');
 export const PROFILE_DIR = path.join(DATA_DIR, 'browser-profile');
 export const OUTPUT_DIR = path.join(DATA_DIR, 'posts');
+export const EXAMPLE_DIR = path.join(DATA_DIR, 'examples');
 
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 export const SESSION_FILE = path.join(DATA_DIR, 'naver-session.json');
 
 export function ensureDirs() {
-  for (const dir of [DATA_DIR, THUMB_DIR, SHOT_DIR, OUTPUT_DIR]) {
+  for (const dir of [DATA_DIR, THUMB_DIR, SHOT_DIR, OUTPUT_DIR, EXAMPLE_DIR]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }

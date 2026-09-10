@@ -16,6 +16,7 @@
     </div>
   </div>
   <div class="pills">
+    <span class="pill" id="pill-model">모델 확인 중</span>
     <span class="pill" id="pill-claude">AI 확인 중</span>
     <span class="pill" id="pill-browser">브라우저 확인 중</span>
     <span class="pill" id="pill-session">로그인 확인 중</span>
@@ -46,26 +47,73 @@
       <h2>2. 주제 붙여넣기</h2>
       <span class="hint" id="paste-count">0개 인식</span>
     </div>
-    <textarea id="topics" rows="9" spellcheck="false"
-      placeholder="엑셀에서 주제 열을 복사해 그대로 붙여넣으세요.&#10;한 줄에 주제 하나씩 인식하고, 탭으로 나뉜 경우 첫 번째 열만 씁니다.&#10;&#10;예)&#10;겨울철 실내 습도 관리하는 법&#10;초보자를 위한 캠핑 장비 고르는 기준&#10;전세 계약 전 꼭 확인할 서류"></textarea>
+    <textarea id="topics" rows="8" spellcheck="false"
+      placeholder="엑셀에서 주제 열을 복사해 그대로 붙여넣으세요.&#10;한 줄에 주제 하나씩 인식하고, 탭으로 나뉜 경우 첫 번째 열만 씁니다.&#10;&#10;예)&#10;2026년 유튜브 구독자 TOP100 순위&#10;겨울철 실내 습도 관리하는 법&#10;초보자를 위한 캠핑 장비 고르는 기준"></textarea>
     <div class="row">
       <button class="btn primary" id="btn-add">목록에 추가</button>
       <button class="btn ghost" id="btn-clear-text">입력 지우기</button>
     </div>
+    <p class="note">주제에 <b>TOP100</b>, <b>50가지</b>, <b>베스트 30</b> 처럼 개수가 들어 있으면
+      자동으로 순위표 글로 인식해서 <b>항목 전부를 표로</b> 만듭니다. (구간을 나눠 생성하므로 시간이 더 걸립니다)</p>
+  </section>
+
+  <section class="card" id="card-guide">
+    <div class="card-head">
+      <h2>3. AI에게 줄 지침 &amp; 참고 예시</h2>
+      <span class="hint" id="guideline-state">여기 쓴 내용이 가장 먼저, 가장 강하게 적용됩니다</span>
+    </div>
+
+    <label class="field-label" for="s-guideline">추가 지침 <span class="tag-strong">최우선 적용</span></label>
+    <textarea id="s-guideline" rows="5" spellcheck="false"
+      placeholder="한 줄에 하나씩 쓰면 더 잘 지킵니다.&#10;&#10;예)&#10;반드시 실제 경험담처럼 쓸 것&#10;마지막에 체크리스트를 넣을 것&#10;가격 정보는 대략적인 범위로만 언급할 것&#10;문단마다 이모지를 하나씩 넣을 것"></textarea>
+    <p class="note">입력 후 자동으로 저장됩니다. 여기 쓴 내용은 프롬프트 맨 앞과 맨 끝에 두 번 들어가고,
+      기본 규칙과 충돌하면 <b>이 지침이 이깁니다.</b></p>
+
+    <div class="divider-line"></div>
+
+    <div class="card-head tight">
+      <h3>참고 예시 글</h3>
+      <span class="hint" id="example-count">0개</span>
+    </div>
+    <p class="note tight">"이런 식으로 써줘" 하고 보여줄 글을 올리면 문체와 구성을 참고합니다.
+      txt / md / html / csv 파일을 올리거나 아래에 직접 붙여넣으세요. (내용을 베끼지는 않습니다)</p>
+    <div class="row">
+      <label class="btn file-btn">
+        파일 첨부
+        <input type="file" id="example-file" accept=".txt,.md,.markdown,.html,.htm,.csv,.json" multiple hidden>
+      </label>
+      <button class="btn ghost" id="btn-example-paste">직접 붙여넣기</button>
+    </div>
+    <div id="example-paste-box" class="hidden">
+      <input id="example-name" type="text" placeholder="예시 이름 (예: 내가 쓴 캠핑 후기)">
+      <textarea id="example-text" rows="6" spellcheck="false" placeholder="참고할 글 전체를 붙여넣으세요."></textarea>
+      <div class="row">
+        <button class="btn primary" id="btn-example-save">예시 저장</button>
+        <button class="btn ghost" id="btn-example-cancel">취소</button>
+      </div>
+    </div>
+    <ul class="example-list" id="example-list"></ul>
   </section>
 
   <section class="card">
     <div class="card-head">
-      <h2>3. 설정</h2>
+      <h2>4. 설정</h2>
       <button class="btn ghost small" id="btn-toggle-settings">펼치기</button>
     </div>
     <div class="settings hidden" id="settings">
       <div class="grid">
+        <label class="wide">사용할 AI 모델
+          <select id="s-model"></select>
+          <span class="sub" id="model-note"></span>
+        </label>
+        <label class="wide hidden" id="model-custom-wrap">직접 입력할 모델 이름
+          <input id="s-model-custom" type="text" placeholder="예: claude-opus-4-6">
+        </label>
+
         <label>말투<input id="s-tone" type="text"></label>
         <label>목표 분량(자)<input id="s-chars" type="number" min="500" max="6000" step="100"></label>
         <label>소제목 개수<input id="s-sections" type="number" min="2" max="10"></label>
         <label>독자<input id="s-audience" type="text"></label>
-        <label class="wide">추가 지침<input id="s-guideline" type="text" placeholder="예: 실제 경험담처럼, 마지막에 체크리스트 넣기"></label>
 
         <label>썸네일 스타일
           <select id="s-thumb-style">
@@ -82,7 +130,6 @@
         <label>글 사이 최소 대기(초)<input id="s-delay-min" type="number" min="0" max="600"></label>
         <label>글 사이 최대 대기(초)<input id="s-delay-max" type="number" min="0" max="1200"></label>
         <label>실패 시 재시도 횟수<input id="s-retries" type="number" min="0" max="5"></label>
-        <label>AI 모델(비우면 기본)<input id="s-model" type="text" placeholder="예: opus"></label>
         <label class="check"><input id="s-headless" type="checkbox"> 브라우저 창 숨기기(헤드리스)</label>
       </div>
       <div class="row">
@@ -95,7 +142,7 @@
 
   <section class="card">
     <div class="card-head">
-      <h2>4. 실행</h2>
+      <h2>5. 실행</h2>
       <span class="hint" id="run-stats">-</span>
     </div>
     <div class="row">
@@ -109,9 +156,12 @@
     <div class="table-wrap">
       <table id="job-table">
         <thead>
-          <tr><th>#</th><th>주제</th><th>상태</th><th>제목 / 메모</th><th>글자수</th><th>썸네일</th><th></th></tr>
+          <tr>
+            <th>#</th><th>주제</th><th>상태</th><th>제목 / 메모</th>
+            <th>글자</th><th>표</th><th>모델</th><th>썸네일</th><th></th>
+          </tr>
         </thead>
-        <tbody id="job-body"><tr><td colspan="7" class="empty">아직 추가된 주제가 없습니다.</td></tr></tbody>
+        <tbody id="job-body"><tr><td colspan="9" class="empty">아직 추가된 주제가 없습니다.</td></tr></tbody>
       </table>
     </div>
   </section>

@@ -3,14 +3,32 @@ import { getSettings } from '../lib/settings.js';
 import { logger } from '../lib/events.js';
 
 /**
+ * 응답 봉투에서 실제로 글을 쓴 모델을 뽑아낸다.
+ * claude CLI 는 modelUsage 에 { "claude-sonnet-5": {...} } 형태로 알려준다.
+ */
+function pickModel(envelope) {
+  const usage = envelope?.modelUsage;
+  if (!usage || typeof usage !== 'object') return '';
+  const entries = Object.entries(usage);
+  if (!entries.length) return '';
+  // 여러 모델이 섞였다면 출력 토큰이 가장 많은 쪽이 본문을 쓴 모델이다.
+  entries.sort((a, b) => (b[1]?.outputTokens || 0) - (a[1]?.outputTokens || 0));
+  const [id, info] = entries[0];
+  return info?.canonicalModel || id;
+}
+
+/**
  * Claude Code CLI 를 -p(print) 모드로 호출한다.
  * API 키 종량제가 아니라 CLI 에 이미 로그인된 구독 계정을 그대로 쓰기 때문에
  * 글을 100개 뽑아도 토큰 요금이 따로 붙지 않는다.
+ *
+ * @returns {Promise<{text: string, model: string, costUsd: number, durationMs: number}>}
  */
-export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal } = {}) {
+export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model } = {}) {
   const settings = getSettings();
   const command = settings.claude.command || 'claude';
   const limit = timeoutMs || settings.claude.timeoutMs || 300000;
+  const wanted = model ?? settings.claude.model;
 
   const args = [
     '-p',
@@ -19,7 +37,7 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal } = {})
     '--no-session-persistence',
     '--strict-mcp-config',
   ];
-  if (settings.claude.model) args.push('--model', settings.claude.model);
+  if (wanted) args.push('--model', wanted);
   if (systemPrompt) args.push('--system-prompt', systemPrompt);
 
   return new Promise((resolve, reject) => {
@@ -79,7 +97,11 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal } = {})
       signal?.removeEventListener('abort', onAbort);
 
       if (code !== 0) {
-        reject(new Error(`claude CLI 종료 코드 ${code}: ${stderr.trim().slice(0, 500) || '(stderr 없음)'}`));
+        const detail = stderr.trim().slice(0, 500) || '(stderr 없음)';
+        const hint = wanted && /model/i.test(detail)
+          ? ` — '${wanted}' 모델을 쓸 수 없는 플랜일 수 있습니다. 설정에서 다른 모델을 골라보세요.`
+          : '';
+        reject(new Error(`claude CLI 종료 코드 ${code}: ${detail}${hint}`));
         return;
       }
 
@@ -89,10 +111,15 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal } = {})
           reject(new Error(`claude 오류: ${envelope.result || envelope.subtype}`));
           return;
         }
-        resolve(String(envelope.result ?? ''));
+        resolve({
+          text: String(envelope.result ?? ''),
+          model: pickModel(envelope) || wanted || '',
+          costUsd: Number(envelope.total_cost_usd) || 0,
+          durationMs: Number(envelope.duration_ms) || 0,
+        });
       } catch {
         // --output-format json 이 아닌 형태로 나온 경우 원문을 그대로 쓴다.
-        resolve(stdout.trim());
+        resolve({ text: stdout.trim(), model: wanted || '', costUsd: 0, durationMs: 0 });
       }
     });
 
@@ -123,17 +150,22 @@ export function extractJson(text) {
   }
 }
 
-/** JSON 응답을 요구하는 호출. 한 번 실패하면 형식을 다시 일러주고 재시도한다. */
+/**
+ * JSON 응답을 요구하는 호출. 한 번 실패하면 형식을 다시 일러주고 재시도한다.
+ * @returns {Promise<{data: any, model: string, costUsd: number}>}
+ */
 export async function runClaudeJson(prompt, options = {}) {
   try {
-    return extractJson(await runClaude(prompt, options));
+    const reply = await runClaude(prompt, options);
+    return { data: extractJson(reply.text), model: reply.model, costUsd: reply.costUsd };
   } catch (error) {
     logger.warn(`AI 응답 파싱 실패, 형식을 다시 지정해 재시도합니다. (${error.message})`);
     const retryPrompt =
       `${prompt}\n\n` +
       `[중요] 설명이나 인사말 없이 JSON 객체 하나만 출력하세요. ` +
       `코드 펜스(\`\`\`)도 쓰지 말고 '{' 로 시작해서 '}' 로 끝나야 합니다.`;
-    return extractJson(await runClaude(retryPrompt, options));
+    const reply = await runClaude(retryPrompt, options);
+    return { data: extractJson(reply.text), model: reply.model, costUsd: reply.costUsd };
   }
 }
 

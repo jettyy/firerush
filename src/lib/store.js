@@ -71,6 +71,9 @@ export function addTopics(topics) {
       title: '',
       thumbnailPath: '',
       charCount: 0,
+      model: '',
+      guidelineCheck: '',
+      tableRows: 0,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };

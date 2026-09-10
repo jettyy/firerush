@@ -7,6 +7,8 @@ import { parseTopics } from './lib/util.js';
 import { openLoginWindow, verifySession, readSessionInfo, logout, closeContext } from './naver/browser.js';
 import { previewThumbnailHtml } from './content/thumbnail.js';
 import { checkClaude } from './ai/claude.js';
+import { MODELS } from './ai/models.js';
+import { listExamples, addExample, removeExample, setExampleEnabled, MAX_EXAMPLE_CHARS } from './content/examples.js';
 import { ensureBrowsers, closeRenderBrowser } from './lib/playwright.js';
 import * as runner from './queue/runner.js';
 
@@ -32,6 +34,8 @@ app.get('/api/state', wrap(async (req, res) => {
     ok: true,
     settings: getSettings(),
     defaults: DEFAULT_SETTINGS,
+    models: MODELS,
+    examples: listExamples(),
     session: readSessionInfo(),
     jobs: listJobs(),
     runner: runner.getRunnerState(),
@@ -123,6 +127,32 @@ app.post('/api/jobs/clear', wrap(async (req, res) => {
 app.post('/api/run/start', wrap(async (req, res) => res.json(runner.start())));
 app.post('/api/run/pause', wrap(async (req, res) => res.json(runner.pause())));
 app.post('/api/run/stop', wrap(async (req, res) => res.json(runner.stop())));
+
+/* ---------- 참고 예시 ---------- */
+
+app.get('/api/examples', wrap(async (req, res) => {
+  res.json({ ok: true, examples: listExamples(), maxChars: MAX_EXAMPLE_CHARS });
+}));
+
+app.post('/api/examples', wrap(async (req, res) => {
+  const { name, content } = req.body || {};
+  if (!String(content || '').trim()) {
+    res.status(400).json({ ok: false, message: '예시 내용이 비어 있습니다.' });
+    return;
+  }
+  const entry = addExample({ name, content });
+  res.json({ ok: true, entry, examples: listExamples() });
+}));
+
+app.post('/api/examples/:id/toggle', wrap(async (req, res) => {
+  setExampleEnabled(req.params.id, req.body?.enabled);
+  res.json({ ok: true, examples: listExamples() });
+}));
+
+app.delete('/api/examples/:id', wrap(async (req, res) => {
+  removeExample(req.params.id);
+  res.json({ ok: true, examples: listExamples() });
+}));
 
 /* ---------- 설정 / 미리보기 ---------- */
 

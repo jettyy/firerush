@@ -62,8 +62,32 @@ async function processJob(job) {
 
   const post = await generatePost(job.topic, { signal: state.abort?.signal });
   const charCount = countChars(post);
-  updateJob(job.id, { title: post.title, charCount, message: `초안 완성 (${charCount}자)` });
-  logger.info(`[${job.topic}] 초안 완성: "${post.title}" (${charCount}자)`, { jobId: job.id });
+  const tableRows = post.table?.rows?.length || 0;
+
+  const notes = [`${charCount}자`];
+  if (tableRows) {
+    notes.push(post.rankingExpected
+      ? `표 ${tableRows}/${post.rankingExpected}행`
+      : `표 ${tableRows}행`);
+  }
+  if (post.rankingMissing?.length) notes.push(`누락 ${post.rankingMissing.length}건`);
+
+  updateJob(job.id, {
+    title: post.title,
+    charCount,
+    tableRows,
+    model: post.model,
+    guidelineCheck: post.guidelineCheck,
+    message: `초안 완성 (${notes.join(', ')})`,
+  });
+  logger.info(
+    `[${job.topic}] 초안 완성: "${post.title}" — ${notes.join(', ')}` +
+    `${post.model ? ` / 모델 ${post.model}` : ''}`,
+    { jobId: job.id },
+  );
+  if (post.guidelineCheck) {
+    logger.info(`[${job.topic}] 지침 반영: ${post.guidelineCheck}`, { jobId: job.id });
+  }
 
   updateJob(job.id, { status: STATUS.THUMBNAIL, message: '썸네일 만드는 중...' });
   const thumb = await renderThumbnail(post, { jobId: job.id });

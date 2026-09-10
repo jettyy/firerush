@@ -152,3 +152,52 @@ tr.active { background: #f2fbf6; }
   .card { padding: 16px; }
   .inline input { width: 130px; }
 }
+
+/* ---------- 지침 & 참고 예시 ---------- */
+
+.card-head.tight { margin: 0 0 6px; }
+.card-head.tight h3 { margin: 0; font-size: 14px; }
+.note.tight { margin: 0 0 12px; }
+
+.field-label {
+  display: block; font-size: 13px; font-weight: 600;
+  margin: 0 0 7px; color: var(--text);
+}
+.tag-strong {
+  display: inline-block; margin-left: 6px; padding: 2px 8px;
+  background: #e6f8ee; color: #077a3d; border-radius: 999px;
+  font-size: 11px; font-weight: 700; vertical-align: 1px;
+}
+#s-guideline { border-color: var(--naver); background: #fcfffd; }
+
+.divider-line { height: 1px; background: var(--line); margin: 22px 0 18px; }
+
+.file-btn { position: relative; cursor: pointer; display: inline-block; }
+
+#example-paste-box { margin: 12px 0 0; }
+#example-paste-box input { margin-bottom: 8px; }
+
+.example-list { list-style: none; margin: 14px 0 0; padding: 0; }
+.example-list li {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: 9px; margin-bottom: 7px; background: #fbfcfd;
+}
+.example-list li.off { opacity: .5; }
+.example-list li.empty-row {
+  justify-content: center; color: var(--muted);
+  font-size: 12.5px; background: transparent; border-style: dashed;
+}
+.ex-toggle { display: flex; align-items: center; gap: 9px; flex: 1; cursor: pointer; min-width: 0; }
+.ex-toggle input { width: auto; }
+.ex-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.grid label .sub { font-size: 11.5px; color: var(--muted); font-weight: 400; line-height: 1.5; }
+
+.check-note {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  background: #e6f8ee; color: #077a3d; font-size: 11px; font-weight: 700;
+  cursor: help; white-space: nowrap;
+}
+td.model-cell { font-size: 12px; color: var(--muted); white-space: nowrap; }

@@ -10,7 +10,9 @@ const STATUS_LABEL = {
   skipped: '건너뜀',
 };
 
-let state = { settings: null, session: null, jobs: [], runner: null };
+const CUSTOM_MODEL = '__custom__';
+
+let state = { settings: null, session: null, jobs: [], runner: null, models: [], examples: [] };
 
 /* ---------- 공통 ---------- */
 
@@ -34,18 +36,39 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
 
+function escapeHtml(value = '') {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
+}
+
+function shortModel(id) {
+  if (!id) return '-';
+  const known = (state.models || []).find((model) => model.id === id);
+  if (known) return known.label.split(' — ')[0];
+  return id.replace(/^claude-/, '');
+}
+
 /* ---------- 렌더 ---------- */
 
 function renderPills(health) {
-  const claude = $('pill-claude');
-  const browser = $('pill-browser');
   if (health) {
+    const claude = $('pill-claude');
+    const browser = $('pill-browser');
     claude.textContent = health.claude.ok ? `AI 준비됨 · ${health.claude.version.split(' ')[0]}` : 'claude CLI 없음';
     claude.className = `pill ${health.claude.ok ? 'ok' : 'bad'}`;
     browser.textContent = health.browser.ok ? '브라우저 준비됨' : '브라우저 준비 실패';
     browser.className = `pill ${health.browser.ok ? 'ok' : 'bad'}`;
   }
   renderSession();
+  renderModelPill();
+}
+
+function renderModelPill() {
+  const pill = $('pill-model');
+  const id = state.settings?.claude?.model || '';
+  pill.textContent = `모델: ${id ? shortModel(id) : '기본값'}`;
+  pill.className = `pill ${id ? 'ok' : ''}`.trim();
 }
 
 function renderSession() {
@@ -64,11 +87,55 @@ function renderSession() {
   }
 }
 
+function renderModels() {
+  const select = $('s-model');
+  const current = state.settings?.claude?.model || '';
+  const known = (state.models || []).some((model) => model.id === current);
+
+  select.innerHTML = (state.models || [])
+    .map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.label)}</option>`)
+    .join('') + `<option value="${CUSTOM_MODEL}">직접 입력…</option>`;
+
+  if (current && !known) {
+    select.value = CUSTOM_MODEL;
+    $('s-model-custom').value = current;
+    $('model-custom-wrap').classList.remove('hidden');
+  } else {
+    select.value = current;
+    $('model-custom-wrap').classList.add('hidden');
+  }
+  updateModelNote();
+}
+
+function updateModelNote() {
+  const select = $('s-model');
+  const model = (state.models || []).find((item) => item.id === select.value);
+  $('model-note').textContent = select.value === CUSTOM_MODEL
+    ? 'claude CLI 가 아는 모델 이름을 그대로 적으세요.'
+    : (model?.note || '');
+}
+
+function renderExamples() {
+  const list = state.examples || [];
+  $('example-count').textContent = `${list.length}개${list.length ? ` (켜짐 ${list.filter((e) => e.enabled).length}개)` : ''}`;
+  $('example-list').innerHTML = list.length
+    ? list.map((entry) => `
+        <li class="${entry.enabled ? '' : 'off'}">
+          <label class="ex-toggle">
+            <input type="checkbox" data-toggle="${entry.id}" ${entry.enabled ? 'checked' : ''}>
+            <span class="ex-name">${escapeHtml(entry.name)}</span>
+          </label>
+          <span class="ex-meta">${entry.chars.toLocaleString()}자${entry.truncated ? ' · 일부만 저장됨' : ''}</span>
+          <button class="btn ghost small danger" data-ex-remove="${entry.id}">삭제</button>
+        </li>`).join('')
+    : '<li class="empty-row">아직 올린 예시가 없습니다.</li>';
+}
+
 function renderJobs() {
   const body = $('job-body');
   const jobs = state.jobs || [];
   if (!jobs.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty">아직 추가된 주제가 없습니다.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="empty">아직 추가된 주제가 없습니다.</td></tr>';
     return;
   }
   const current = state.runner?.currentJobId;
@@ -79,12 +146,17 @@ function renderJobs() {
         ? `<a href="/thumbnails/${encodeURIComponent(job.thumbnailPath)}" target="_blank" rel="noopener">
              <img src="/thumbnails/${encodeURIComponent(job.thumbnailPath)}" alt="썸네일"></a>`
         : '<span class="hint">-</span>';
+      const note = job.guidelineCheck
+        ? `<span class="check-note" title="${escapeHtml(job.guidelineCheck)}">지침 ✓</span>`
+        : '';
       return `<tr class="${job.id === current ? 'active' : ''}">
         <td>${index + 1}</td>
         <td class="topic">${escapeHtml(job.topic)}</td>
         <td><span class="badge ${job.status}">${label}</span></td>
-        <td class="msg">${job.title ? `<b>${escapeHtml(job.title)}</b>` : ''}${escapeHtml(job.message || '')}</td>
+        <td class="msg">${job.title ? `<b>${escapeHtml(job.title)}</b>` : ''}${escapeHtml(job.message || '')} ${note}</td>
         <td>${job.charCount || '-'}</td>
+        <td>${job.tableRows ? `${job.tableRows}행` : '-'}</td>
+        <td class="model-cell">${escapeHtml(shortModel(job.model))}</td>
         <td class="thumb-cell">${thumb}</td>
         <td>
           <button class="btn ghost small" data-retry="${job.id}">재시도</button>
@@ -98,7 +170,7 @@ function renderJobs() {
 function renderRunner() {
   const runner = state.runner;
   if (!runner) return;
-  const { total, done, failed, pending, running } = runner.stats;
+  const { total, done, failed, pending } = runner.stats;
   const finished = done + failed;
   $('progress-bar').style.width = total ? `${Math.round((finished / total) * 100)}%` : '0%';
 
@@ -114,7 +186,6 @@ function renderRunner() {
   $('btn-pause').disabled = !runner.running;
   $('btn-pause').textContent = runner.paused ? '이어서 실행' : '일시정지';
   $('btn-stop').disabled = !runner.running;
-  void running;
 }
 
 function renderSettings() {
@@ -125,21 +196,18 @@ function renderSettings() {
   $('s-chars').value = s.post.targetChars;
   $('s-sections').value = s.post.sectionCount;
   $('s-audience').value = s.post.audience;
-  $('s-guideline').value = s.post.extraGuideline || '';
+  if (document.activeElement !== $('s-guideline')) {
+    $('s-guideline').value = s.post.extraGuideline || '';
+  }
   $('s-thumb-style').value = s.thumbnail.style;
   $('s-thumb-w').value = s.thumbnail.width;
   $('s-thumb-h').value = s.thumbnail.height;
   $('s-delay-min').value = s.run.delayMinSec;
   $('s-delay-max').value = s.run.delayMaxSec;
   $('s-retries').value = s.run.maxRetries;
-  $('s-model').value = s.claude.model || '';
   $('s-headless').checked = Boolean(s.run.headless);
-}
-
-function escapeHtml(value = '') {
-  return String(value).replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[ch]));
+  renderModels();
+  renderModelPill();
 }
 
 function appendLog(entry) {
@@ -167,6 +235,7 @@ function connectStream() {
       if (index >= 0) state.jobs[index] = payload; else state.jobs.push(payload);
       renderJobs();
     } else if (type === 'runner') { state.runner = payload; renderRunner(); renderJobs(); }
+    else if (type === 'examples') { state.examples = payload; renderExamples(); }
     else if (type === 'session') { state.session = payload; renderSession(); refreshState(); }
   };
   source.onerror = () => { /* EventSource 가 알아서 재접속한다. */ };
@@ -176,9 +245,18 @@ function connectStream() {
 
 async function refreshState() {
   const data = await api('/api/state');
-  state = { ...state, settings: data.settings, session: data.session, jobs: data.jobs, runner: data.runner };
+  state = {
+    ...state,
+    settings: data.settings,
+    session: data.session,
+    jobs: data.jobs,
+    runner: data.runner,
+    models: data.models || state.models,
+    examples: data.examples || [],
+  };
   renderSettings();
   renderSession();
+  renderExamples();
   renderJobs();
   renderRunner();
   return data;
@@ -191,6 +269,42 @@ async function boot() {
   connectStream();
   api('/api/health').then(renderPills).catch(() => {});
   setInterval(renderRunner, 1000);
+}
+
+/* ---------- 설정 저장 ---------- */
+
+function collectSettings() {
+  const select = $('s-model');
+  const model = select.value === CUSTOM_MODEL ? $('s-model-custom').value.trim() : select.value;
+  return {
+    blogId: $('blog-id').value.trim(),
+    claude: { model },
+    post: {
+      tone: $('s-tone').value,
+      targetChars: Number($('s-chars').value),
+      sectionCount: Number($('s-sections').value),
+      audience: $('s-audience').value,
+      extraGuideline: $('s-guideline').value,
+    },
+    thumbnail: {
+      style: $('s-thumb-style').value,
+      width: Number($('s-thumb-w').value),
+      height: Number($('s-thumb-h').value),
+    },
+    run: {
+      delayMinSec: Number($('s-delay-min').value),
+      delayMaxSec: Number($('s-delay-max').value),
+      maxRetries: Number($('s-retries').value),
+      headless: $('s-headless').checked,
+    },
+  };
+}
+
+async function patchSettings(patch) {
+  const data = await api('/api/settings', { method: 'POST', body: patch });
+  state.settings = data.settings;
+  renderModelPill();
+  return data.settings;
 }
 
 /* ---------- 버튼 ---------- */
@@ -241,45 +355,58 @@ $('btn-clear-text').onclick = () => {
   $('paste-count').textContent = '0개 인식';
 };
 
+/* 추가 지침 — 저장 버튼을 누르지 않아도 자동으로 저장한다. */
+let guidelineTimer = null;
+function saveGuideline(immediate = false) {
+  clearTimeout(guidelineTimer);
+  const run = async () => {
+    $('guideline-state').textContent = '저장 중...';
+    try {
+      await patchSettings({ post: { extraGuideline: $('s-guideline').value } });
+      const length = $('s-guideline').value.trim().length;
+      $('guideline-state').textContent = length
+        ? `저장됨 · ${length}자 (다음 글부터 적용)`
+        : '지침 없음 — 기본 규칙으로 씁니다';
+    } catch (error) {
+      $('guideline-state').textContent = `저장 실패: ${error.message}`;
+    }
+  };
+  if (immediate) run();
+  else guidelineTimer = setTimeout(run, 700);
+}
+$('s-guideline').addEventListener('input', () => saveGuideline());
+$('s-guideline').addEventListener('blur', () => saveGuideline(true));
+
 $('btn-toggle-settings').onclick = () => {
   const panel = $('settings');
   panel.classList.toggle('hidden');
   $('btn-toggle-settings').textContent = panel.classList.contains('hidden') ? '펼치기' : '접기';
 };
 
-function collectSettings() {
-  return {
-    blogId: $('blog-id').value.trim(),
-    claude: { model: $('s-model').value.trim() },
-    post: {
-      tone: $('s-tone').value,
-      targetChars: Number($('s-chars').value),
-      sectionCount: Number($('s-sections').value),
-      audience: $('s-audience').value,
-      extraGuideline: $('s-guideline').value,
-    },
-    thumbnail: {
-      style: $('s-thumb-style').value,
-      width: Number($('s-thumb-w').value),
-      height: Number($('s-thumb-h').value),
-    },
-    run: {
-      delayMinSec: Number($('s-delay-min').value),
-      delayMaxSec: Number($('s-delay-max').value),
-      maxRetries: Number($('s-retries').value),
-      headless: $('s-headless').checked,
-    },
-  };
-}
+$('s-model').addEventListener('change', async () => {
+  const custom = $('s-model').value === CUSTOM_MODEL;
+  $('model-custom-wrap').classList.toggle('hidden', !custom);
+  updateModelNote();
+  if (custom) {
+    $('s-model-custom').focus();
+    return;
+  }
+  await patchSettings({ claude: { model: $('s-model').value } });
+  toast(`모델을 ${shortModel($('s-model').value) || '기본값'}(으)로 바꿨습니다.`);
+});
+
+$('s-model-custom').addEventListener('change', async () => {
+  await patchSettings({ claude: { model: $('s-model-custom').value.trim() } });
+  toast('모델을 저장했습니다.');
+});
 
 $('btn-save-settings').onclick = async () => {
-  const data = await api('/api/settings', { method: 'POST', body: collectSettings() });
-  state.settings = data.settings;
+  await patchSettings(collectSettings());
   toast('설정을 저장했습니다.');
 };
 
 $('blog-id').addEventListener('change', async () => {
-  await api('/api/settings', { method: 'POST', body: { blogId: $('blog-id').value.trim() } });
+  await patchSettings({ blogId: $('blog-id').value.trim() });
   toast('블로그 아이디를 저장했습니다.');
 });
 
@@ -296,6 +423,67 @@ $('btn-preview-thumb').onclick = () => {
   frame.src = `/api/thumbnail/preview?${params}`;
   frame.classList.remove('hidden');
 };
+
+/* ---------- 참고 예시 ---------- */
+
+$('example-file').addEventListener('change', async (event) => {
+  const files = [...event.target.files];
+  event.target.value = '';
+  for (const file of files) {
+    try {
+      const content = await file.text();
+      await api('/api/examples', { method: 'POST', body: { name: file.name, content } });
+    } catch (error) {
+      toast(`${file.name}: ${error.message}`);
+    }
+  }
+  await refreshState();
+  toast(`예시 ${files.length}개를 올렸습니다.`);
+});
+
+$('btn-example-paste').onclick = () => {
+  $('example-paste-box').classList.toggle('hidden');
+  if (!$('example-paste-box').classList.contains('hidden')) $('example-text').focus();
+};
+
+$('btn-example-cancel').onclick = () => {
+  $('example-paste-box').classList.add('hidden');
+  $('example-text').value = '';
+  $('example-name').value = '';
+};
+
+$('btn-example-save').onclick = async () => {
+  const content = $('example-text').value;
+  if (!content.trim()) return toast('예시 내용을 붙여넣어 주세요.');
+  await api('/api/examples', {
+    method: 'POST',
+    body: { name: $('example-name').value || '붙여넣은 예시', content },
+  });
+  $('example-text').value = '';
+  $('example-name').value = '';
+  $('example-paste-box').classList.add('hidden');
+  await refreshState();
+  toast('예시를 저장했습니다.');
+};
+
+$('example-list').addEventListener('click', async (event) => {
+  const removeId = event.target.dataset.exRemove;
+  if (!removeId) return;
+  await api(`/api/examples/${removeId}`, { method: 'DELETE' });
+  await refreshState();
+});
+
+$('example-list').addEventListener('change', async (event) => {
+  const toggleId = event.target.dataset.toggle;
+  if (!toggleId) return;
+  await api(`/api/examples/${toggleId}/toggle`, {
+    method: 'POST',
+    body: { enabled: event.target.checked },
+  });
+  await refreshState();
+});
+
+/* ---------- 실행 ---------- */
 
 $('btn-start').onclick = async () => {
   try {
