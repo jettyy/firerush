@@ -4,7 +4,7 @@ import { getContext } from './browser.js';
 import { getSettings } from '../lib/settings.js';
 import { SHOT_DIR, ensureDirs } from '../lib/paths.js';
 import { logger } from '../lib/events.js';
-import { buildIntroHtml, buildBodyBlocks, htmlToPlainText } from '../content/html.js';
+import { buildIntroHtml, buildBodyBlocks, htmlToPlainText, BLOCK_GAP } from '../content/html.js';
 
 const MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -218,10 +218,12 @@ export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
     }
 
     // 표가 큰 글은 한 번에 밀어 넣으면 에디터가 버거워한다. 블록 단위로 나눠 붙인다.
+    // 각 블록 앞에 빈 문단을 붙이는 게 핵심이다. 그게 없으면 블록의 첫 문단이
+    // 커서가 있던 문단 뒤에 그대로 이어붙어 "구조였습니다.• • •소제목" 처럼 나온다.
     const blocks = buildBodyBlocks(post);
     let lastMode = '';
     for (let index = 0; index < blocks.length; index += 1) {
-      lastMode = await pasteHtml(page, scope, blocks[index]);
+      lastMode = await pasteHtml(page, scope, BLOCK_GAP + blocks[index]);
       if (blocks.length > 3) {
         logger.info(`본문 ${index + 1}/${blocks.length} 블록 입력 (${lastMode})`, { jobId });
       }

@@ -16,8 +16,8 @@ function inline(text) {
  * 표 아래 회색 안내문 다음부터 본문 전체가 회색으로 나온다.
  */
 const BLACK = '#000000';
-const P = `margin:0 0 14px 0; line-height:1.9; font-size:16px; color:${BLACK};`;
-const SPACER = `<p style="color:${BLACK};"><br></p>`;
+const P = `margin:0 0 14px 0; line-height:1.9; font-size:16px; color:${BLACK}; text-align:left;`;
+const SPACER = `<p style="color:${BLACK}; text-align:left;"><br></p>`;
 
 function paragraph(text) {
   return `<p style="${P}">${inline(text)}</p>`;
@@ -26,22 +26,23 @@ function paragraph(text) {
 function heading(text) {
   return (
     `<p style="margin:34px 0 14px 0; line-height:1.6; font-size:19px; font-weight:700; ` +
-    `color:${BLACK};">${inline(text)}</p>`
+    `color:${BLACK}; text-align:left;">${inline(text)}</p>`
   );
 }
 
 function quote(text) {
   return (
     `<blockquote style="margin:20px 0; padding:12px 18px; border-left:4px solid #03c75a; ` +
-    `background:#f7f9f8; line-height:1.8; font-size:16px; color:${BLACK};">${inline(text)}</blockquote>`
+    `background:#f7f9f8; line-height:1.8; font-size:16px; color:${BLACK}; ` +
+    `text-align:left;">${inline(text)}</blockquote>`
   );
 }
 
 function list(items) {
   const li = items
     .map((item) => (
-      `<li style="margin:0 0 8px 0; line-height:1.8; font-size:16px; color:${BLACK};">` +
-      `${inline(item)}</li>`
+      `<li style="margin:0 0 8px 0; line-height:1.8; font-size:16px; color:${BLACK}; ` +
+      `text-align:left;">${inline(item)}</li>`
     ))
     .join('');
   return `<ul style="margin:16px 0 20px 0; padding-left:22px; color:${BLACK};">${li}</ul>`;
@@ -84,8 +85,8 @@ export function buildTableHtml(table) {
   );
   if (table.note) {
     parts.push(
-      `<p style="margin:10px 0 0 0; font-size:14px; color:#7a8590; line-height:1.7;">` +
-      `${inline(table.note)}</p>`,
+      `<p style="margin:10px 0 0 0; font-size:14px; color:#7a8590; line-height:1.7; ` +
+      `text-align:left;">${inline(table.note)}</p>`,
     );
     // 회색 안내문 뒤에 검정 문단을 하나 둬서 다음 블록이 회색을 물려받지 않게 한다.
     parts.push(SPACER);
@@ -108,37 +109,57 @@ function sectionHtml(section) {
 }
 
 /**
+ * 붙여넣기 블록 사이에 넣는 빈 문단.
+ *
+ * 에디터는 붙여넣은 HTML 의 첫 문단을 커서가 있던 문단에 합쳐버린다.
+ * 그래서 블록 맨 앞에 빈 문단을 하나 두어 그게 대신 합쳐지게 하고,
+ * 진짜 내용은 제 서식을 지닌 새 문단으로 들어가게 한다.
+ */
+export const BLOCK_GAP = SPACER;
+
+/**
  * 본문을 붙여넣기 단위로 쪼갠 배열.
- * 100행짜리 표가 있는 글은 한 번에 밀어 넣으면 에디터가 버거워하므로
- * 섹션 단위로 나눠서 순서대로 붙인다.
+ *
+ * 블록 경계마다 문단이 합쳐지는 문제가 있으므로 경계를 최소로 둔다.
+ * 100행짜리 표만 따로 떼어 [표 앞] · [표] · [표 뒤] 세 덩어리로 나눈다.
+ * 표가 없으면 통째로 한 번에 붙인다.
  */
 export function buildBodyBlocks(post) {
-  const blocks = [];
   const tableHtml = buildTableHtml(post.table);
-  let tablePlaced = false;
+  const pieces = [];
+  let tableIndex = -1;
 
   post.sections.forEach((section, index) => {
-    if (index > 0) blocks.push(divider());
-    blocks.push(sectionHtml(section));
+    if (index > 0) pieces.push(divider());
+    pieces.push(sectionHtml(section));
     // 첫 섹션(배경 설명) 다음이 표가 들어가기 가장 자연스러운 자리다.
     if (index === 0 && tableHtml) {
-      blocks.push(tableHtml);
-      tablePlaced = true;
+      tableIndex = pieces.length;
+      pieces.push(tableHtml);
     }
   });
 
-  if (tableHtml && !tablePlaced) blocks.push(tableHtml);
+  if (tableHtml && tableIndex === -1) {
+    tableIndex = pieces.length;
+    pieces.push(tableHtml);
+  }
 
   if (post.outro.length) {
-    blocks.push(divider());
-    blocks.push(post.outro.map(paragraph).join(SPACER));
+    pieces.push(divider());
+    pieces.push(post.outro.map(paragraph).join(SPACER));
   }
 
   if (post.tags.length) {
-    blocks.push(paragraph(post.tags.map((tag) => `#${tag}`).join(' ')));
+    pieces.push(paragraph(post.tags.map((tag) => `#${tag}`).join(' ')));
   }
 
-  return blocks.filter(Boolean);
+  if (tableIndex === -1) return [pieces.join(SPACER)].filter(Boolean);
+
+  return [
+    pieces.slice(0, tableIndex).join(SPACER),
+    pieces[tableIndex],
+    pieces.slice(tableIndex + 1).join(SPACER),
+  ].filter(Boolean);
 }
 
 /** 썸네일 뒤에 들어갈 본문 전체 (미리보기·백업용). */
