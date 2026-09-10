@@ -201,13 +201,42 @@ app.get('/api/thumbnail/preview', wrap(async (req, res) => {
 /* ---------- 시작 ---------- */
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';   // IPv4 로 확실히 열어둔다.
 
-const server = app.listen(PORT, () => {
+// 서버가 조용히 죽으면 브라우저에는 "연결 거부"만 뜨고 이유를 알 수 없다.
+// 무슨 일이 있었는지 창에 남기고, 창이 바로 닫히지 않게 붙잡아 둔다.
+function fatal(label, error) {
+  logger.error(`${label}: ${error?.message || error}`);
+  if (error?.stack) console.error(error.stack);
+  console.error('\n창을 닫지 말고 위 내용을 그대로 알려주세요.\n');
+}
+
+process.on('uncaughtException', (error) => fatal('예기치 못한 오류', error));
+process.on('unhandledRejection', (error) => fatal('처리되지 않은 오류', error));
+
+const server = app.listen(PORT, HOST, () => {
   logger.info(`대시보드가 열렸습니다 → http://localhost:${PORT}`);
+  logger.info(`열리지 않으면 이 주소로 접속해 보세요 → http://127.0.0.1:${PORT}`);
   const { total, pending } = stats();
   logger.info(`저장된 주제 ${total}건 (대기 ${pending}건)`);
   ensureBrowsers().catch((error) => logger.error(`크로미움 준비 실패: ${error.message}`));
-  verifySession({ headless: true }).catch(() => {});
+  verifySession({ headless: true }).catch((error) => {
+    logger.warn(`시작할 때 세션 확인을 건너뛰었습니다: ${error.message}`);
+  });
+});
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    logger.error(
+      `${PORT}번 포트를 이미 다른 프로그램이 쓰고 있습니다. ` +
+      `열려 있는 다른 검은 창을 닫거나, PORT=3001 npm start 로 다른 포트를 쓰세요.`,
+    );
+  } else if (error.code === 'EACCES') {
+    logger.error(`${PORT}번 포트를 열 권한이 없습니다. PORT=3001 npm start 로 시도해 보세요.`);
+  } else {
+    fatal('서버를 열지 못했습니다', error);
+  }
+  process.exitCode = 1;
 });
 
 async function shutdown() {
