@@ -6,7 +6,7 @@ import { listJobs, addTopics, removeJob, clearJobs, resetJob, stats, STATUS } fr
 import { parseTopics } from './lib/util.js';
 import { openLoginWindow, verifySession, readSessionInfo, logout, closeContext } from './naver/browser.js';
 import { previewThumbnailHtml } from './content/thumbnail.js';
-import { checkClaude } from './ai/claude.js';
+import { checkClaude, runClaude } from './ai/claude.js';
 import { MODELS } from './ai/models.js';
 import { listExamples, addExample, removeExample, setExampleEnabled, MAX_EXAMPLE_CHARS } from './content/examples.js';
 import { ensureBrowsers, closeRenderBrowser } from './lib/playwright.js';
@@ -127,6 +127,33 @@ app.post('/api/jobs/clear', wrap(async (req, res) => {
 app.post('/api/run/start', wrap(async (req, res) => res.json(runner.start())));
 app.post('/api/run/pause', wrap(async (req, res) => res.json(runner.pause())));
 app.post('/api/run/stop', wrap(async (req, res) => res.json(runner.stop())));
+
+/* ---------- AI 연결 테스트 ---------- */
+
+/**
+ * 85개를 돌리기 전에 지금 고른 모델로 실제 호출이 되는지 한 번 확인한다.
+ * 모델을 못 쓰거나 로그인이 풀렸으면 여기서 바로 드러난다.
+ */
+app.post('/api/ai/test', wrap(async (req, res) => {
+  const model = getSettings().claude.model;
+  logger.step(`AI 연결 테스트 시작${model ? ` (${model})` : ''}`);
+  try {
+    const reply = await runClaude('"준비완료" 라고만 답하세요. 다른 말은 하지 마세요.', {
+      systemPrompt: '당신은 짧게 답하는 도우미입니다.',
+      timeoutMs: 120000,
+    });
+    logger.info(`AI 연결 테스트 성공 — 모델 ${reply.model}, 응답: ${reply.text.trim().slice(0, 40)}`);
+    res.json({
+      ok: true,
+      model: reply.model,
+      answer: reply.text.trim().slice(0, 100),
+      durationMs: reply.durationMs,
+    });
+  } catch (error) {
+    logger.error(`AI 연결 테스트 실패: ${error.message}`);
+    res.json({ ok: true, failed: true, message: error.message, dumpFile: error.dumpFile || '' });
+  }
+}));
 
 /* ---------- 참고 예시 ---------- */
 

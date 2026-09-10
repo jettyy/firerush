@@ -1,6 +1,92 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { getSettings } from '../lib/settings.js';
 import { logger } from '../lib/events.js';
+import { LOG_DIR, ensureDirs } from '../lib/paths.js';
+
+const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * 윈도우 콘솔은 한국어를 CP949(EUC-KR)로 내보낸다.
+ * 그대로 UTF-8 로 읽으면 "모델을 찾을 수 없습니다" 가 "���� ã�� �� �����ϴ�" 로 깨진다.
+ */
+function decodeOutput(chunks) {
+  const buffer = Buffer.concat(chunks);
+  if (!buffer.length) return '';
+
+  const utf8 = buffer.toString('utf8');
+  if (!utf8.includes('�')) return utf8;
+
+  for (const encoding of ['euc-kr', 'cp949', 'windows-1252']) {
+    try {
+      const alternative = new TextDecoder(encoding).decode(buffer);
+      if (!alternative.includes('�')) return alternative;
+    } catch {
+      // 이 인코딩은 이 런타임에서 지원하지 않는다. 다음 후보로.
+    }
+  }
+  return utf8;
+}
+
+/**
+ * shell 을 거칠 때는 Node 가 인자를 따옴표로 감싸주지 않는다.
+ * 공백이 든 인자를 그냥 넘기면 여러 조각으로 쪼개져 CLI 가 종료 코드 1로 죽는다.
+ */
+function quoteForShell(value) {
+  const text = String(value);
+  if (!/[\s"^&|<>()%!]/.test(text)) return text;
+  return IS_WINDOWS ? `"${text.replace(/"/g, '""')}"` : `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 사용량/요청 한도에 걸린 오류인지. 이 경우 계속 돌려봐야 전부 실패한다. */
+function looksRateLimited(message) {
+  return /(rate[ _-]?limit|usage limit|too many requests|429|quota|한도|사용량|제한을 초과)/i.test(String(message));
+}
+
+/** 실패했을 때 원문을 파일로 남긴다. 깨진 메시지만 보고는 원인을 못 찾는다. */
+function dumpFailure({ args, stdout, stderr, code }) {
+  try {
+    ensureDirs();
+    const file = path.join(LOG_DIR, `claude-fail-${Date.now()}.log`);
+    fs.writeFileSync(file, [
+      `exit code: ${code}`,
+      `platform: ${process.platform}`,
+      `args: ${JSON.stringify(args)}`,
+      '',
+      '--- stdout ---',
+      stdout,
+      '',
+      '--- stderr ---',
+      stderr,
+    ].join('\n'), 'utf8');
+    return file;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 종료 코드가 0이 아니어도 claude 는 stdout 에 JSON 으로 이유를 적어놓는 경우가 있다.
+ * stderr 만 보면 "(stderr 없음)" 으로 끝나 원인을 놓친다.
+ */
+function errorMessageFrom(stdout, stderr) {
+  const trimmedOut = stdout.trim();
+  if (trimmedOut) {
+    try {
+      const envelope = JSON.parse(trimmedOut);
+      const detail = envelope.result || envelope.error || envelope.message || envelope.subtype;
+      if (detail) return String(detail);
+    } catch {
+      // JSON 이 아니면 마지막 몇 줄을 그대로 보여준다.
+    }
+    const tail = trimmedOut.split('\n').filter(Boolean).slice(-3).join(' ');
+    if (tail) return tail.slice(0, 400);
+  }
+  const trimmedErr = stderr.trim();
+  if (trimmedErr) return trimmedErr.split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400);
+  return '';
+}
 
 /**
  * 응답 봉투에서 실제로 글을 쓴 모델을 뽑아낸다.
@@ -19,8 +105,10 @@ function pickModel(envelope) {
 
 /**
  * Claude Code CLI 를 -p(print) 모드로 호출한다.
- * API 키 종량제가 아니라 CLI 에 이미 로그인된 구독 계정을 그대로 쓰기 때문에
- * 글을 100개 뽑아도 토큰 요금이 따로 붙지 않는다.
+ * API 키 종량제가 아니라 CLI 에 이미 로그인된 구독 계정을 그대로 쓴다.
+ *
+ * 시스템 프롬프트는 --system-prompt 인자가 아니라 stdin 본문 맨 앞에 넣는다.
+ * 윈도우에서 공백이 든 인자가 쪼개지는 문제를 원천적으로 피하기 위해서다.
  *
  * @returns {Promise<{text: string, model: string, costUsd: number, durationMs: number}>}
  */
@@ -38,22 +126,26 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model 
     '--strict-mcp-config',
   ];
   if (wanted) args.push('--model', wanted);
-  if (systemPrompt) args.push('--system-prompt', systemPrompt);
+
+  const fullPrompt = systemPrompt
+    ? `${systemPrompt}\n\n============================================================\n\n${prompt}`
+    : prompt;
 
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(command, args, {
+      child = spawn(command, IS_WINDOWS ? args.map(quoteForShell) : args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: process.platform === 'win32',
+        shell: IS_WINDOWS,
+        windowsHide: true,
       });
     } catch (error) {
       reject(new Error(`claude CLI 를 실행하지 못했습니다: ${error.message}`));
       return;
     }
 
-    let stdout = '';
-    let stderr = '';
+    const outChunks = [];
+    const errChunks = [];
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -72,8 +164,8 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model 
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.on('data', (chunk) => outChunks.push(chunk));
+    child.stderr.on('data', (chunk) => errChunks.push(chunk));
 
     child.on('error', (error) => {
       if (settled) return;
@@ -96,19 +188,38 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model 
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
 
+      const stdout = decodeOutput(outChunks);
+      const stderr = decodeOutput(errChunks);
+
       if (code !== 0) {
-        const detail = stderr.trim().slice(0, 500) || '(stderr 없음)';
-        const hint = wanted && /model/i.test(detail)
-          ? ` — '${wanted}' 모델을 쓸 수 없는 플랜일 수 있습니다. 설정에서 다른 모델을 골라보세요.`
-          : '';
-        reject(new Error(`claude CLI 종료 코드 ${code}: ${detail}${hint}`));
+        const detail = errorMessageFrom(stdout, stderr);
+        const dump = dumpFailure({ args, stdout, stderr, code });
+
+        let hint = '';
+        if (looksRateLimited(detail)) {
+          hint = ' — 사용량 한도에 걸린 것 같습니다. 잠시 뒤에 다시 시도하세요.';
+        } else if (wanted && /model|모델/i.test(detail)) {
+          hint = ` — '${wanted}' 모델을 쓸 수 없는 플랜일 수 있습니다. 설정에서 다른 모델을 골라보세요.`;
+        } else if (!detail) {
+          hint = dump ? ` — 원문을 ${dump} 에 남겼습니다.` : '';
+        }
+
+        const error = new Error(
+          `claude CLI 종료 코드 ${code}: ${detail || '(출력 없음)'}${hint}`,
+        );
+        error.rateLimited = looksRateLimited(detail);
+        error.dumpFile = dump;
+        reject(error);
         return;
       }
 
       try {
         const envelope = JSON.parse(stdout);
         if (envelope.is_error) {
-          reject(new Error(`claude 오류: ${envelope.result || envelope.subtype}`));
+          const message = String(envelope.result || envelope.subtype || '알 수 없는 오류');
+          const error = new Error(`claude 오류: ${message}`);
+          error.rateLimited = looksRateLimited(message);
+          reject(error);
           return;
         }
         resolve({
@@ -123,7 +234,7 @@ export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model 
       }
     });
 
-    child.stdin.end(prompt, 'utf8');
+    child.stdin.end(fullPrompt, 'utf8');
   });
 }
 
@@ -159,6 +270,10 @@ export async function runClaudeJson(prompt, options = {}) {
     const reply = await runClaude(prompt, options);
     return { data: extractJson(reply.text), model: reply.model, costUsd: reply.costUsd };
   } catch (error) {
+    // CLI 자체가 실패한 경우는 형식을 다시 일러줘도 소용없다. 그대로 올린다.
+    if (/종료 코드|찾을 수 없습니다|중지했습니다|오지 않았습니다|claude 오류/.test(error.message)) {
+      throw error;
+    }
     logger.warn(`AI 응답 파싱 실패, 형식을 다시 지정해 재시도합니다. (${error.message})`);
     const retryPrompt =
       `${prompt}\n\n` +
@@ -176,13 +291,14 @@ export async function checkClaude() {
   return new Promise((resolve) => {
     const child = spawn(command, ['--version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
+      shell: IS_WINDOWS,
+      windowsHide: true,
     });
-    let out = '';
-    child.stdout.on('data', (c) => { out += c; });
+    const chunks = [];
+    child.stdout.on('data', (c) => chunks.push(c));
     child.on('error', () => resolve({ ok: false, version: '', message: 'claude CLI 를 찾을 수 없습니다.' }));
     child.on('close', (code) => {
-      if (code === 0) resolve({ ok: true, version: out.trim(), message: '' });
+      if (code === 0) resolve({ ok: true, version: decodeOutput(chunks).trim(), message: '' });
       else resolve({ ok: false, version: '', message: `claude --version 종료 코드 ${code}` });
     });
   });

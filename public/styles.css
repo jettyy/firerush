@@ -201,3 +201,12 @@ tr.active { background: #f2fbf6; }
   cursor: help; white-space: nowrap;
 }
 td.model-cell { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.test-result {
+  margin-top: 12px; padding: 11px 14px; border-radius: 9px;
+  font-size: 13px; line-height: 1.7; white-space: pre-wrap;
+  word-break: break-word; background: #eef1f4; color: var(--muted);
+  font-family: 'SFMono-Regular', 'D2Coding', Consolas, monospace;
+}
+.test-result.good { background: #e6f8ee; color: #077a3d; }
+.test-result.bad { background: #fdecec; color: #b3302a; }

@@ -410,6 +410,31 @@ $('blog-id').addEventListener('change', async () => {
   toast('블로그 아이디를 저장했습니다.');
 });
 
+$('btn-test-ai').onclick = async () => {
+  const box = $('ai-test-result');
+  const button = $('btn-test-ai');
+  button.disabled = true;
+  box.classList.remove('hidden', 'bad', 'good');
+  box.textContent = '테스트 중... (최대 2분)';
+  try {
+    const data = await api('/api/ai/test', { method: 'POST' });
+    if (data.failed) {
+      box.classList.add('bad');
+      box.textContent = `실패: ${data.message}` + (data.dumpFile ? `\n원문: ${data.dumpFile}` : '');
+    } else {
+      box.classList.add('good');
+      box.textContent =
+        `성공 — 모델 ${shortModel(data.model)} (${data.model})\n` +
+        `응답: ${data.answer} · ${Math.round((data.durationMs || 0) / 100) / 10}초`;
+    }
+  } catch (error) {
+    box.classList.add('bad');
+    box.textContent = `실패: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+};
+
 $('btn-preview-thumb').onclick = () => {
   const params = new URLSearchParams({
     headline: '겨울철 실내 습도 관리법',

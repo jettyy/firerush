@@ -108,8 +108,12 @@ async function processJob(job) {
   logger.info(`[${job.topic}] 임시저장 완료`, { jobId: job.id });
 }
 
+// 같은 이유로 계속 실패할 때 남은 주제를 전부 태우지 않도록 하는 한계선.
+const STOP_AFTER_FAILURES = 3;
+
 async function loop() {
   let processed = 0;
+  let consecutiveFailures = 0;
 
   while (state.running) {
     if (state.paused) {
@@ -125,8 +129,20 @@ async function loop() {
 
     try {
       await processJob(job);
+      consecutiveFailures = 0;
     } catch (error) {
       const message = error.message || String(error);
+
+      // 사용량 한도는 계속 돌려도 전부 실패한다. 멈추고 사람이 판단하게 둔다.
+      if (error.rateLimited) {
+        updateJob(job.id, { status: STATUS.PENDING, message: `사용량 한도로 대기: ${message}` });
+        state.paused = true;
+        logger.error(`사용량 한도에 걸려 일시정지했습니다. 잠시 뒤 [이어서 실행]을 눌러주세요. ${message}`);
+        broadcast();
+        continue;
+      }
+
+      consecutiveFailures += 1;
       const canRetry = job.attempts <= getSettings().run.maxRetries;
       if (canRetry && state.running) {
         updateJob(job.id, { status: STATUS.PENDING, message: `실패, 재시도 예정: ${message}` });
@@ -135,6 +151,16 @@ async function loop() {
       } else {
         updateJob(job.id, { status: STATUS.FAILED, message });
         logger.error(`[${job.topic}] 실패: ${message}`, { jobId: job.id });
+      }
+
+      // 설정이 잘못됐거나 CLI 가 죽은 상태라면 남은 주제도 전부 같은 이유로 실패한다.
+      // 85건을 몇 초 만에 실패로 태우는 대신 멈춰서 알린다.
+      if (consecutiveFailures >= STOP_AFTER_FAILURES) {
+        logger.error(
+          `연속 ${consecutiveFailures}건이 같은 이유로 실패해 실행을 멈춥니다. ` +
+          `마지막 오류: ${message}`,
+        );
+        state.running = false;
       }
     } finally {
       state.currentJobId = null;
