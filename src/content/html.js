@@ -10,8 +10,14 @@ function inline(text) {
     .replace(/&lt;\/b&gt;/gi, '</b>');
 }
 
-const P = 'margin:0 0 14px 0; line-height:1.9; font-size:16px;';
-const SPACER = '<p><br></p>';
+/**
+ * 모든 요소에 글자색을 직접 박아둔다.
+ * 색을 비워두면 에디터가 바로 앞 블록의 색을 물려받아서,
+ * 표 아래 회색 안내문 다음부터 본문 전체가 회색으로 나온다.
+ */
+const BLACK = '#000000';
+const P = `margin:0 0 14px 0; line-height:1.9; font-size:16px; color:${BLACK};`;
+const SPACER = `<p style="color:${BLACK};"><br></p>`;
 
 function paragraph(text) {
   return `<p style="${P}">${inline(text)}</p>`;
@@ -19,23 +25,26 @@ function paragraph(text) {
 
 function heading(text) {
   return (
-    `<p style="margin:34px 0 14px 0; line-height:1.6; font-size:19px; font-weight:700;">` +
-    `${inline(text)}</p>`
+    `<p style="margin:34px 0 14px 0; line-height:1.6; font-size:19px; font-weight:700; ` +
+    `color:${BLACK};">${inline(text)}</p>`
   );
 }
 
 function quote(text) {
   return (
     `<blockquote style="margin:20px 0; padding:12px 18px; border-left:4px solid #03c75a; ` +
-    `background:#f7f9f8; line-height:1.8; font-size:16px;">${inline(text)}</blockquote>`
+    `background:#f7f9f8; line-height:1.8; font-size:16px; color:${BLACK};">${inline(text)}</blockquote>`
   );
 }
 
 function list(items) {
   const li = items
-    .map((item) => `<li style="margin:0 0 8px 0; line-height:1.8; font-size:16px;">${inline(item)}</li>`)
+    .map((item) => (
+      `<li style="margin:0 0 8px 0; line-height:1.8; font-size:16px; color:${BLACK};">` +
+      `${inline(item)}</li>`
+    ))
     .join('');
-  return `<ul style="margin:16px 0 20px 0; padding-left:22px;">${li}</ul>`;
+  return `<ul style="margin:16px 0 20px 0; padding-left:22px; color:${BLACK};">${li}</ul>`;
 }
 
 const divider = () => `<p style="text-align:center; margin:26px 0; color:#c0c6cc;">• • •</p>`;
@@ -47,7 +56,7 @@ export function buildTableHtml(table) {
   const th = table.headers
     .map((header) => (
       `<th style="border:1px solid #d8dee4; padding:9px 10px; background:#f3f6f8; ` +
-      `font-size:15px; font-weight:700; text-align:left;">${inline(header)}</th>`
+      `font-size:15px; font-weight:700; text-align:left; color:${BLACK};">${inline(header)}</th>`
     ))
     .join('');
 
@@ -56,7 +65,8 @@ export function buildTableHtml(table) {
       const tds = row
         .map((cell, column) => (
           `<td style="border:1px solid #d8dee4; padding:8px 10px; font-size:15px; ` +
-          `line-height:1.6;${column === 0 ? ' text-align:center; font-weight:600;' : ''}">` +
+          `line-height:1.6; color:${BLACK};` +
+          `${column === 0 ? ' text-align:center; font-weight:600;' : ''}">` +
           `${inline(cell)}</td>`
         ))
         .join('');
@@ -69,7 +79,7 @@ export function buildTableHtml(table) {
   if (table.heading) parts.push(heading(table.heading));
   parts.push(
     `<table border="1" cellspacing="0" cellpadding="6" ` +
-    `style="border-collapse:collapse; width:100%; margin:16px 0;">` +
+    `style="border-collapse:collapse; width:100%; margin:16px 0; color:${BLACK};">` +
     `<thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`,
   );
   if (table.note) {
@@ -77,6 +87,8 @@ export function buildTableHtml(table) {
       `<p style="margin:10px 0 0 0; font-size:14px; color:#7a8590; line-height:1.7;">` +
       `${inline(table.note)}</p>`,
     );
+    // 회색 안내문 뒤에 검정 문단을 하나 둬서 다음 블록이 회색을 물려받지 않게 한다.
+    parts.push(SPACER);
   }
   return parts.join('');
 }

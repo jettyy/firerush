@@ -64,50 +64,54 @@ function buildSystemPrompt(guideline) {
 function conditionsBlock(settings, ranking) {
   const { tone, targetChars, sectionCount, audience } = settings.post;
   const lines = [
-    '[기본 작성 규칙]',
-    '(위 사용자 지침과 충돌하면 지침을 따르세요. 아래는 지침이 다루지 않은 부분의 기본값입니다.)',
-    `- 말투: ${tone}`,
-    `- 목표 분량: 공백 포함 ${targetChars}자 내외 (표는 분량에서 제외)`,
-    `- 소제목 개수: ${sectionCount}개`,
-    `- 독자: ${audience}`,
-    '- 제목은 32자 이내, 검색해볼 법한 단어를 앞쪽에 배치하세요.',
-    '- 각 문단은 2~3문장으로 짧게 끊습니다.',
-    '- 모든 소제목마다 문단이 2~4개 있어야 합니다.',
-    '- 각 문단에서 가장 중요한 표현 한두 개는 <b>강조</b> 태그로 감싸세요. 다른 HTML 태그는 쓰지 마세요.',
-    '- 과장 광고 표현("최고", "무조건", "100% 보장")은 피하세요.',
-    '- 확실하지 않은 수치나 고유명사는 지어내지 마세요.',
+    '[기본 규칙] (사용자 지침과 충돌하면 지침 우선)',
+    `- 말투: ${tone} / 독자: ${audience}`,
+    `- 본문 분량: 공백 포함 ${targetChars}자 내외. 넘기지 마세요. (표는 분량에서 제외)`,
+    `- 소제목 ${sectionCount}개, 소제목마다 문단 2개`,
+    '- 문단은 2~3문장으로 짧게. 제목은 32자 이내.',
+    '- 문단마다 핵심 표현 한둘을 <b>강조</b>로 감싸기. 다른 HTML 태그 금지.',
+    '- 과장 광고 표현 금지.',
   ];
-  if (!ranking?.isRanking) {
-    lines.push('- 최소 한 개 섹션에는 항목 목록(list)을 넣으세요.');
-    lines.push('- 최소 한 개 섹션에는 핵심을 요약한 인용구(quote)를 넣으세요.');
+
+  if (ranking?.isRanking) {
+    // 순위 글의 핵심은 표다. 본문은 짧게 가야 토큰과 시간이 줄어든다.
+    lines.push('- 본문은 표를 보조하는 역할입니다. 짧고 담백하게, 개별 항목 나열은 하지 마세요.');
+    // 공식 순위가 없는 주제가 대부분이다. 없는 조사 결과를 사실처럼 쓰라고 하면
+    // 모델이 (당연히) 거절한다. 처음부터 "참고용 정리" 로 정직하게 틀을 잡는다.
+    lines.push(
+      '- 이 표는 공식 조사 결과가 아니라 일반적으로 알려진 정보를 모아 정리한 ' +
+      '**참고용 자료**입니다. 실제 조사 수치를 지어내지 말고, 널리 알려진 특징 위주로 채우세요.',
+    );
+    lines.push(
+      '- table.note 에는 "공식 순위가 아니라 일반적인 정보를 참고해 정리한 자료이며 ' +
+      '최신 정보는 직접 확인이 필요하다"는 안내를 반드시 넣으세요.',
+    );
+    lines.push('- 순서는 절대적인 우열이 아니라 소개 순서로 다루세요.');
+  } else {
+    lines.push('- 확실하지 않은 수치·고유명사는 지어내지 마세요.');
+    lines.push('- 한 섹션에는 항목 목록(list), 다른 섹션에는 인용구(quote)를 넣으세요.');
   }
   return lines.join('\n');
 }
 
 const THUMBNAIL_BLOCK = `[썸네일 문구]
-글 위에 들어갈 카드형 썸네일 문구도 만들어주세요.
-- headline: 18자 이내, 한눈에 읽히는 굵은 문구
-- subline: 30자 이내 보조 설명
-- badge: 6자 이내 짧은 라벨 (예: "정리", "초보 가이드")
-- style: bold, gradient, minimal, editorial 중 주제 분위기에 맞는 하나
-- accent: 어두운 계열 HEX 색상 (흰 글씨가 올라갑니다)
-- emoji: 주제를 상징하는 이모지 1개`;
+- headline: 18자 이내 / subline: 30자 이내 / badge: 6자 이내
+- style: bold, gradient, minimal, editorial 중 하나
+- accent: 어두운 계열 HEX (흰 글씨가 올라갑니다) / emoji: 1개`;
 
 /** 표를 한 번에 받아도 되는 보통 글용 프롬프트. */
 function buildStandardPrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }) {
   const tableHint = ranking?.isRanking
     ? `
 
-[표 — 이 글에는 반드시 표가 들어갑니다]
-- 순위/목록형 주제이므로 table 필드를 반드시 채우세요.
+[표 — 이 글의 핵심입니다. 여기에 공을 들이세요]
+- table 필드를 반드시 채우세요. 열은 3개 (순위 | 이름 | 특징) 를 권합니다.
 - ${ranking.count ? `정확히 ${ranking.count}개 행` : '주제가 요구하는 모든 항목'}을 빠짐없이 넣으세요.
-- "이하 생략", "...", "(중략)" 같은 표현은 절대 쓰지 마세요.
-- 설명 칸은 25자 이내로 짧게.`
+- "이하 생략", "...", "(중략)" 금지. 각 칸 20자 이내.`
     : `
 
 [표 — 필요할 때만]
-- 비교·순위·목록처럼 표가 더 읽기 좋은 내용이 있으면 table 필드를 채우세요.
-- 필요 없으면 table 을 아예 빼세요.`;
+- 비교·순위처럼 표가 읽기 좋은 내용이면 table 을 채우고, 아니면 키를 빼세요.`;
 
   return `${guidelineBlock}주제: "${topic}"
 
@@ -118,37 +122,19 @@ ${tableHint}
 
 ${THUMBNAIL_BLOCK}
 ${exampleBlock ? `\n${exampleBlock}\n` : ''}
-[출력 형식]
-아래 JSON 객체 하나만 출력하세요. 설명이나 코드 펜스를 붙이지 마세요.
+[출력] JSON 객체 하나만. 설명도 코드 펜스도 붙이지 마세요.
 
 {
-  "title": "글 제목",
-  "summary": "한 줄 요약",
-  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
-  "guidelineCheck": "사용자 지침을 어떻게 반영했는지 한 줄 (지침이 없으면 빈 문자열)",
-  "thumbnail": {
-    "headline": "...", "subline": "...", "badge": "...",
-    "style": "bold", "accent": "#1F3A93", "emoji": "📌"
-  },
+  "title": "제목", "summary": "한 줄 요약", "tags": ["태그1","태그2","태그3"],
+  "guidelineCheck": "지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
+  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"bold","accent":"#1F3A93","emoji":"📌"},
   "intro": ["도입 문단1", "도입 문단2"],
-  "table": {
-    "heading": "표 제목",
-    "headers": ["순위", "항목", "설명"],
-    "rows": [["1", "항목 이름", "짧은 설명"]],
-    "note": "표 아래 붙일 짧은 안내 (없으면 빈 문자열)"
-  },
-  "sections": [
-    {
-      "heading": "소제목",
-      "paragraphs": ["문단1", "문단2"],
-      "list": ["항목1", "항목2"],
-      "quote": "핵심 요약 한 문장"
-    }
-  ],
-  "outro": ["마무리 문단1", "마무리 문단2"]
+  "table": {"heading":"표 제목","headers":["순위","이름","특징"],"rows":[["1","이름","특징"]],"note":""},
+  "sections": [{"heading":"소제목","paragraphs":["문단1","문단2"],"list":[],"quote":""}],
+  "outro": ["마무리 문단"]
 }
 
-list, quote, table 은 필요할 때만 넣고 없으면 키를 생략하세요.${buildGuidelineReminder(settings.post.extraGuideline)}`;
+list, quote, table 은 필요할 때만.${buildGuidelineReminder(settings.post.extraGuideline)}`;
 }
 
 /**
@@ -158,42 +144,28 @@ list, quote, table 은 필요할 때만 넣고 없으면 키를 생략하세요.
 function buildStructurePrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }) {
   return `${guidelineBlock}주제: "${topic}"
 
-위 주제로 네이버 블로그 글을 씁니다.
-이 글에는 **${ranking.count}개 항목이 모두 들어간 큰 표**가 하나 들어갑니다.
-표의 내용(행)은 뒤에서 따로 채울 것이므로, **지금은 표의 뼈대만** 잡아주세요.
+이 글에는 ${ranking.count}개 항목이 모두 들어간 큰 표가 하나 들어갑니다.
+표의 행은 뒤에서 따로 채우므로 **지금은 뼈대만** 잡아주세요.
 
 ${conditionsBlock(settings, ranking)}
 
 [표 뼈대]
-- table.headers: 표의 열 이름 3~4개. 첫 열은 반드시 "순위".
-  예) ["순위", "이름", "특징"] 또는 ["순위", "채널명", "구독자 규모", "주요 콘텐츠"]
-- table.heading: 표 위에 붙일 소제목 (예: "${topic} 전체 정리")
-- table.note: 표 아래 붙일 짧은 안내 한 줄
-- rows 는 넣지 마세요. 비워두면 됩니다.
-
-[본문]
-- 표 앞뒤로 읽을거리가 있어야 합니다. 소제목 ${settings.post.sectionCount}개로 본문을 써주세요.
-- 표에 다 담기지 않는 배경 설명, 고르는 기준, 상위 항목 짚어주기 같은 내용이 좋습니다.
-- 본문에서 개별 항목을 나열하지는 마세요. 나열은 표가 담당합니다.
+- table.headers: 열 이름 3개. 첫 열은 반드시 "순위". 예) ["순위","이름","특징"]
+- table.heading: 표 위 소제목 / table.note: 표 아래 짧은 안내 한 줄
+- rows 는 넣지 마세요.
 
 ${THUMBNAIL_BLOCK}
 ${exampleBlock ? `\n${exampleBlock}\n` : ''}
-[출력 형식]
-아래 JSON 객체 하나만 출력하세요.
+[출력] JSON 객체 하나만.
 
 {
-  "title": "글 제목",
-  "summary": "한 줄 요약",
-  "tags": ["태그1", "태그2", "태그3"],
-  "guidelineCheck": "사용자 지침을 어떻게 반영했는지 한 줄 (지침이 없으면 빈 문자열)",
-  "thumbnail": {
-    "headline": "...", "subline": "...", "badge": "...",
-    "style": "bold", "accent": "#1F3A93", "emoji": "📌"
-  },
+  "title": "제목", "summary": "한 줄 요약", "tags": ["태그1","태그2","태그3"],
+  "guidelineCheck": "지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
+  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"bold","accent":"#1F3A93","emoji":"📌"},
   "intro": ["도입 문단1", "도입 문단2"],
-  "table": { "heading": "...", "headers": ["순위", "이름", "특징"], "note": "..." },
-  "sections": [{ "heading": "소제목", "paragraphs": ["문단1", "문단2"] }],
-  "outro": ["마무리 문단1"]
+  "table": {"heading":"...","headers":["순위","이름","특징"],"note":"..."},
+  "sections": [{"heading":"소제목","paragraphs":["문단1","문단2"]}],
+  "outro": ["마무리 문단"]
 }${buildGuidelineReminder(settings.post.extraGuideline)}`;
 }
 
@@ -337,8 +309,6 @@ export async function generatePost(topic, options = {}) {
       topic,
       headers,
       count: ranking.count,
-      guidelineBlock,
-      systemPrompt,
       signal: options.signal,
       onProgress: options.onProgress,
     });

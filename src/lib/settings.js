@@ -15,8 +15,8 @@ export const DEFAULT_SETTINGS = {
   // 글 설정
   post: {
     tone: '친근한 존댓말 (~해요체)',
-    targetChars: 2000,
-    sectionCount: 5,
+    targetChars: 1200,          // 짧을수록 빠르고 토큰도 적게 든다.
+    sectionCount: 3,
     audience: '해당 주제를 처음 접하는 일반 독자',
     extraGuideline: '',
   },
@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS = {
     delayMaxSec: 90,
     maxRetries: 1,
     headless: false,             // 네이버는 실제 창을 띄우는 편이 안전하다.
-    slowMoMs: 40,
+    slowMoMs: 20,
     screenshotOnError: true,
     chromiumPath: '',            // 비우면 Playwright가 받아온 크로미움을 쓴다.
   },

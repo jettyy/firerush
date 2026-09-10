@@ -9,8 +9,19 @@ import { logger } from '../lib/events.js';
  * 빠진 순위가 있으면 그 구간만 다시 받는다.
  */
 
-const CHUNK_SIZE = 25;
+/**
+ * claude -p 는 호출 한 번당 CLI 자체 시스템 프롬프트로만 3만 토큰 넘게 쓴다.
+ * 그래서 토큰과 시간을 줄이는 가장 큰 지렛대는 "호출 횟수를 줄이는 것" 이다.
+ * 한 번에 받는 행 수를 늘려 호출을 줄인다.
+ */
+const CHUNK_SIZE = 50;
 const MAX_COUNT = 200;
+
+/** 이 개수까지는 본문과 표를 한 번의 호출로 같이 받는다. */
+export const SINGLE_CALL_LIMIT = 40;
+
+/** 표 행만 뽑는 호출에는 블로그 작법 지시가 필요 없다. 짧을수록 싸고 빠르다. */
+const ROW_SYSTEM = '표 데이터를 JSON 으로만 출력합니다. 설명을 붙이지 않습니다.';
 
 /** 주제 문자열에서 "몇 개짜리 순위 글인지" 알아낸다. */
 export function detectRanking(topic) {
@@ -40,8 +51,9 @@ export function detectRanking(topic) {
   return {
     isRanking: Boolean(isRankingWord || count),
     count,
-    // 표를 나눠 받아야 할 만큼 큰지. 10개 이하는 한 번에 받아도 안 잘린다.
-    needsChunking: Boolean(count && count > 10),
+    // 호출 한 번이 비싸므로 웬만하면 한 번에 받는다.
+    // 40개 정도까지는 본문과 같이 받아도 잘리지 않는다.
+    needsChunking: Boolean(count && count > SINGLE_CALL_LIMIT),
   };
 }
 
@@ -68,7 +80,7 @@ function rankOf(row) {
   return matched ? Number(matched[0]) : null;
 }
 
-function buildChunkPrompt({ topic, headers, start, end, existingNames, guidelineBlock }) {
+function buildChunkPrompt({ topic, headers, start, end, existingNames }) {
   const expected = end - start + 1;
   // 예시 행은 반드시 실제 열 개수와 같아야 한다.
   // 3칸짜리 예시를 고정으로 보여주면 열이 4개여도 3칸만 채워서 돌려준다.
@@ -76,31 +88,21 @@ function buildChunkPrompt({ topic, headers, start, end, existingNames, guideline
     [String(rank), ...headers.slice(1).map((header) => `${header} 내용`)],
   );
 
-  return `${guidelineBlock}주제: "${topic}"
+  return `주제: "${topic}"
+이 주제의 순위표에서 ${start}~${end}위, 정확히 ${expected}개 행을 채우세요.
 
-이 주제로 쓰는 블로그 글에 들어갈 **전체 순위 표**의 일부를 채워주세요.
+열: ${headers.join(' | ')}
 
-[이번에 채울 범위]
-${start}위부터 ${end}위까지, 정확히 ${expected}개 행.
+규칙
+- ${expected}개 행 전부 출력. "이하 생략", "...", "(중략)" 금지.
+- 첫 칸은 순위 숫자만 (${start}~${end}).
+- 각 행은 정확히 ${headers.length}칸, 빈 칸 없이.
+- 각 칸 20자 이내.
+- 공식 조사 결과가 아니라 널리 알려진 정보를 모은 참고용 표입니다. 실제 조사 수치는 지어내지 말고 일반적인 특징으로 채우세요.
+${existingNames.length ? `- 이미 나온 항목 제외: ${existingNames.slice(-60).join(', ')}` : ''}
 
-[표의 열 구성]
-${headers.map((header, index) => `${index + 1}. ${header}`).join('\n')}
-
-[반드시 지킬 것]
-- ${expected}개 행을 하나도 빠뜨리지 말고 모두 출력하세요.
-- "이하 생략", "...", "(중략)", "나머지는 비슷합니다" 같은 표현은 절대 쓰지 마세요.
-- 첫 번째 열에는 순위 숫자만 넣으세요 (${start}, ${start + 1}, ... ${end}).
-- 각 행의 칸 수는 정확히 ${headers.length}개여야 합니다. 빈 칸을 남기지 말고 모두 채우세요.
-- 각 칸은 25자 이내로 짧게 쓰세요. 길게 쓰면 표가 읽기 어려워집니다.
-- 확실하지 않은 구체적 수치(정확한 매출액, 구독자 수 등)는 지어내지 말고 일반적인 설명으로 대체하세요.
-${existingNames.length ? `- 아래 항목은 앞 구간에 이미 나왔습니다. 중복해서 넣지 마세요.\n  ${existingNames.slice(-60).join(', ')}` : ''}
-
-[출력 형식]
-JSON 객체 하나만 출력하세요. 설명도 코드 펜스도 붙이지 마세요.
-
-{"rows": [${sampleRow(start)}, ${sampleRow(start + 1)}]}
-
-각 행은 반드시 ${headers.length}개 칸(${headers.join(', ')})을 모두 가져야 합니다.`;
+JSON 만 출력:
+{"rows": [${sampleRow(start)}, ${sampleRow(start + 1)}]}`;
 }
 
 /**
@@ -111,8 +113,6 @@ export async function generateRankingRows({
   topic,
   headers,
   count,
-  guidelineBlock = '',
-  systemPrompt = '',
   signal,
   onProgress,
 }) {
@@ -122,8 +122,8 @@ export async function generateRankingRows({
 
   const fetchRange = async (start, end) => {
     const existingNames = [...byRank.values()].map((row) => row[1]).filter(Boolean);
-    const prompt = buildChunkPrompt({ topic, headers, start, end, existingNames, guidelineBlock });
-    const reply = await runClaudeJson(prompt, { systemPrompt, signal });
+    const prompt = buildChunkPrompt({ topic, headers, start, end, existingNames });
+    const reply = await runClaudeJson(prompt, { systemPrompt: ROW_SYSTEM, signal });
     model = reply.model || model;
 
     for (const row of normalizeRows(reply.data?.rows, columnCount)) {

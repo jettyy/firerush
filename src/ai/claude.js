@@ -266,10 +266,27 @@ export function extractJson(text) {
  * @returns {Promise<{data: any, model: string, costUsd: number}>}
  */
 export async function runClaudeJson(prompt, options = {}) {
+  let lastText = '';
   try {
     const reply = await runClaude(prompt, options);
+    lastText = reply.text;
     return { data: extractJson(reply.text), model: reply.model, costUsd: reply.costUsd };
   } catch (error) {
+    // 파싱이 깨졌을 때 원문이 없으면 왜 깨졌는지 알 방법이 없다.
+    if (lastText) {
+      const dump = dumpFailure({ args: ['(json parse)'], stdout: lastText, stderr: error.message, code: 0 });
+      if (dump) logger.warn(`AI 원문을 ${dump} 에 남겼습니다.`);
+    }
+
+    // JSON 대신 긴 산문이 왔다면 형식 문제가 아니라 "이 주제로는 못 쓰겠다" 는 거절이다.
+    // 형식을 다시 일러줘도 소용없으니 호출을 한 번 더 쓰지 않고 이유를 그대로 올린다.
+    if (lastText.trim().length > 120 && !lastText.includes('{')) {
+      const reason = lastText.trim().replace(/\s+/g, ' ').slice(0, 300);
+      const refusal = new Error(`AI가 이 주제로 글쓰기를 거절했습니다: ${reason}`);
+      refusal.refusal = true;
+      refusal.reason = lastText.trim();
+      throw refusal;
+    }
     // CLI 자체가 실패한 경우는 형식을 다시 일러줘도 소용없다. 그대로 올린다.
     if (/종료 코드|찾을 수 없습니다|중지했습니다|오지 않았습니다|claude 오류/.test(error.message)) {
       throw error;
