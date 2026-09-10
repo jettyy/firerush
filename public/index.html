@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>파이어러시 · 네이버 블로그 자동 작성</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🔥</span>
+    <div>
+      <h1>파이어러시</h1>
+      <p>주제를 붙여넣으면 AI가 글과 썸네일을 만들어 네이버 블로그에 임시저장합니다.</p>
+    </div>
+  </div>
+  <div class="pills">
+    <span class="pill" id="pill-claude">AI 확인 중</span>
+    <span class="pill" id="pill-browser">브라우저 확인 중</span>
+    <span class="pill" id="pill-session">로그인 확인 중</span>
+  </div>
+</header>
+
+<main>
+  <section class="card" id="card-login">
+    <div class="card-head">
+      <h2>1. 네이버 로그인</h2>
+      <span class="hint" id="login-detail">세션은 이 컴퓨터에만 저장됩니다.</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btn-login">네이버 로그인 창 열기</button>
+      <button class="btn" id="btn-verify">세션 확인</button>
+      <button class="btn ghost" id="btn-logout">세션 삭제</button>
+      <label class="inline">
+        블로그 아이디
+        <input id="blog-id" type="text" placeholder="예: myblog" autocomplete="off">
+      </label>
+    </div>
+    <p class="note">로그인 버튼을 누르면 실제 브라우저 창이 뜹니다. 아이디·비밀번호는 그 창에 직접 입력하세요.
+      이 프로그램은 로그인 정보를 저장하거나 전송하지 않습니다.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>2. 주제 붙여넣기</h2>
+      <span class="hint" id="paste-count">0개 인식</span>
+    </div>
+    <textarea id="topics" rows="9" spellcheck="false"
+      placeholder="엑셀에서 주제 열을 복사해 그대로 붙여넣으세요.&#10;한 줄에 주제 하나씩 인식하고, 탭으로 나뉜 경우 첫 번째 열만 씁니다.&#10;&#10;예)&#10;겨울철 실내 습도 관리하는 법&#10;초보자를 위한 캠핑 장비 고르는 기준&#10;전세 계약 전 꼭 확인할 서류"></textarea>
+    <div class="row">
+      <button class="btn primary" id="btn-add">목록에 추가</button>
+      <button class="btn ghost" id="btn-clear-text">입력 지우기</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>3. 설정</h2>
+      <button class="btn ghost small" id="btn-toggle-settings">펼치기</button>
+    </div>
+    <div class="settings hidden" id="settings">
+      <div class="grid">
+        <label>말투<input id="s-tone" type="text"></label>
+        <label>목표 분량(자)<input id="s-chars" type="number" min="500" max="6000" step="100"></label>
+        <label>소제목 개수<input id="s-sections" type="number" min="2" max="10"></label>
+        <label>독자<input id="s-audience" type="text"></label>
+        <label class="wide">추가 지침<input id="s-guideline" type="text" placeholder="예: 실제 경험담처럼, 마지막에 체크리스트 넣기"></label>
+
+        <label>썸네일 스타일
+          <select id="s-thumb-style">
+            <option value="auto">AI가 선택</option>
+            <option value="bold">bold · 진한 단색</option>
+            <option value="gradient">gradient · 그라데이션</option>
+            <option value="minimal">minimal · 흰 배경</option>
+            <option value="editorial">editorial · 잡지풍</option>
+          </select>
+        </label>
+        <label>썸네일 가로(px)<input id="s-thumb-w" type="number" min="600" max="2000" step="10"></label>
+        <label>썸네일 세로(px)<input id="s-thumb-h" type="number" min="400" max="2000" step="10"></label>
+
+        <label>글 사이 최소 대기(초)<input id="s-delay-min" type="number" min="0" max="600"></label>
+        <label>글 사이 최대 대기(초)<input id="s-delay-max" type="number" min="0" max="1200"></label>
+        <label>실패 시 재시도 횟수<input id="s-retries" type="number" min="0" max="5"></label>
+        <label>AI 모델(비우면 기본)<input id="s-model" type="text" placeholder="예: opus"></label>
+        <label class="check"><input id="s-headless" type="checkbox"> 브라우저 창 숨기기(헤드리스)</label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-save-settings">설정 저장</button>
+        <button class="btn" id="btn-preview-thumb">썸네일 미리보기</button>
+      </div>
+      <iframe id="thumb-preview" class="thumb-preview hidden" title="썸네일 미리보기"></iframe>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>4. 실행</h2>
+      <span class="hint" id="run-stats">-</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btn-start">실행</button>
+      <button class="btn" id="btn-pause">일시정지</button>
+      <button class="btn" id="btn-stop">중지</button>
+      <button class="btn ghost" id="btn-clear-done">완료 항목 정리</button>
+      <button class="btn ghost danger" id="btn-clear-all">전체 비우기</button>
+    </div>
+    <div class="progress"><div class="bar" id="progress-bar"></div></div>
+    <div class="table-wrap">
+      <table id="job-table">
+        <thead>
+          <tr><th>#</th><th>주제</th><th>상태</th><th>제목 / 메모</th><th>글자수</th><th>썸네일</th><th></th></tr>
+        </thead>
+        <tbody id="job-body"><tr><td colspan="7" class="empty">아직 추가된 주제가 없습니다.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>진행 로그</h2>
+      <button class="btn ghost small" id="btn-clear-log">지우기</button>
+    </div>
+    <div class="console" id="console"></div>
+  </section>
+</main>
+
+<div class="toast hidden" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
