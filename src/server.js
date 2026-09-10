@@ -1,6 +1,6 @@
 import express from 'express';
 import { PUBLIC_DIR, THUMB_DIR, OUTPUT_DIR, ensureDirs } from './lib/paths.js';
-import { bus, recentLogs, logger } from './lib/events.js';
+import { bus, recentLogs, logger, logRaw, logFile } from './lib/events.js';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from './lib/settings.js';
 import { listJobs, addTopics, removeJob, clearJobs, resetJob, stats, STATUS } from './lib/store.js';
 import { parseTopics } from './lib/util.js';
@@ -207,16 +207,26 @@ const HOST = process.env.HOST || '0.0.0.0';   // IPv4 로 확실히 열어둔다
 // 무슨 일이 있었는지 창에 남기고, 창이 바로 닫히지 않게 붙잡아 둔다.
 function fatal(label, error) {
   logger.error(`${label}: ${error?.message || error}`);
-  if (error?.stack) console.error(error.stack);
-  console.error('\n창을 닫지 말고 위 내용을 그대로 알려주세요.\n');
+  if (error?.stack) {
+    console.error(error.stack);
+    logRaw(error.stack);
+  }
+  console.error(`\n기록: ${logFile()}\n창을 닫지 말고 위 내용을 그대로 알려주세요.\n`);
 }
 
+// 여기서 잡지 않으면 프로세스가 아무 말 없이 종료되고,
+// 브라우저에는 "연결할 수 없음" 만 남는다.
 process.on('uncaughtException', (error) => fatal('예기치 못한 오류', error));
 process.on('unhandledRejection', (error) => fatal('처리되지 않은 오류', error));
+
+process.on('exit', (code) => {
+  if (code !== 0) logRaw(`${new Date().toISOString()} [EXIT ] 종료 코드 ${code}`);
+});
 
 const server = app.listen(PORT, HOST, () => {
   logger.info(`대시보드가 열렸습니다 → http://localhost:${PORT}`);
   logger.info(`열리지 않으면 이 주소로 접속해 보세요 → http://127.0.0.1:${PORT}`);
+  logger.info(`이 창의 기록은 ${logFile()} 에도 남습니다.`);
   const { total, pending } = stats();
   logger.info(`저장된 주제 ${total}건 (대기 ${pending}건)`);
   ensureBrowsers().catch((error) => logger.error(`크로미움 준비 실패: ${error.message}`));
