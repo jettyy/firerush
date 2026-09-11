@@ -8,12 +8,14 @@ import { buildIntroHtml, buildBodyBlocks, htmlToPlainText, BLOCK_GAP } from '../
 
 const MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-/** 에디터가 iframe(#mainFrame) 안에 있을 수도, 페이지 자체일 수도 있다. */
-async function resolveEditorScope(page) {
-  await page.waitForLoadState('domcontentloaded');
-  const deadline = Date.now() + 30000;
-
+/**
+ * 에디터가 iframe(#mainFrame) 안에 있을 수도, 페이지 자체일 수도 있다.
+ * 못 찾으면 null 을 돌려준다 (주소를 바꿔가며 여러 번 시도하기 위해).
+ */
+async function findEditorScope(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (page.isClosed()) return null;
     for (const frame of page.frames()) {
       for (const selector of SELECTORS.editorReady) {
         const found = await frame
@@ -24,9 +26,69 @@ async function resolveEditorScope(page) {
         if (found) return frame;
       }
     }
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(400).catch(() => {});
   }
-  throw new Error('스마트에디터를 찾지 못했습니다. 글쓰기 화면이 열렸는지 확인해 주세요.');
+  return null;
+}
+
+/**
+ * 글쓰기 화면을 연다.
+ *
+ * 저장된 블로그 아이디가 지금 로그인한 계정의 것이 아니면 (계정을 바꿨을 때)
+ * ?Redirect=Write 주소는 글쓰기로 가지 않고 그냥 그 블로그 홈을 보여준다.
+ * 그래서 주소를 여러 개 시도하고, 그래도 안 되면 블로그 화면의 글쓰기 링크를 누른다.
+ */
+async function openWriteEditor(page, blogId, jobId) {
+  const candidates = [
+    `https://blog.naver.com/${blogId}/postwrite`,
+    `https://blog.naver.com/${blogId}?Redirect=Write&`,
+    `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`,
+  ];
+
+  for (const url of candidates) {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    const scope = await findEditorScope(page, 12000);
+    if (scope) {
+      logger.info(`글쓰기 화면 진입: ${url}`, { jobId });
+      return { scope, page };
+    }
+    logger.warn(`글쓰기 화면이 아닙니다 (${page.url()}). 다음 방법을 시도합니다.`, { jobId });
+  }
+
+  // 마지막 수단: 블로그 화면에서 글쓰기 링크를 직접 누른다.
+  logger.step('블로그 화면에서 글쓰기 버튼을 찾아 누릅니다.', { jobId });
+  await page.goto(`https://blog.naver.com/${blogId}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  }).catch(() => {});
+  await page.waitForTimeout(1500);
+
+  for (const frame of page.frames()) {
+    const clicked = await clickIfPresent(frame, SELECTORS.writeLink, 2000);
+    if (!clicked) continue;
+    logger.info(`글쓰기 링크를 눌렀습니다 (${clicked})`, { jobId });
+    await page.waitForTimeout(2500);
+
+    const scope = await findEditorScope(page, 15000);
+    if (scope) return { scope, page };
+
+    // 새 창으로 열렸을 수도 있다.
+    const pages = page.context().pages();
+    for (const candidate of pages) {
+      if (candidate === page || candidate.isClosed()) continue;
+      const popupScope = await findEditorScope(candidate, 8000);
+      if (popupScope) {
+        logger.info('글쓰기가 새 창으로 열렸습니다.', { jobId });
+        return { scope: popupScope, page: candidate };
+      }
+    }
+  }
+
+  throw new Error(
+    `글쓰기 화면을 열지 못했습니다. 현재 주소: ${page.url()} — ` +
+    `블로그 아이디(${blogId})가 지금 로그인한 계정의 것이 맞는지 확인해 주세요. ` +
+    `계정을 바꾸셨다면 대시보드에서 [세션 확인]을 누르거나 설정에서 아이디를 고쳐주세요.`,
+  );
 }
 
 async function dismissPopups(scope) {
@@ -188,17 +250,16 @@ export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
   if (!blogId) throw new Error('블로그 아이디가 없습니다. 로그인하거나 설정에서 입력해 주세요.');
 
   const context = await getContext();
-  const page = await context.newPage();
-  page.setDefaultTimeout(30000);
+  const opener = await context.newPage();
+  opener.setDefaultTimeout(30000);
+  let page = opener;
 
   try {
     logger.step(`에디터 열기: ${post.title}`, { jobId });
-    await page.goto(`https://blog.naver.com/${blogId}?Redirect=Write&`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+    const opened = await openWriteEditor(page, blogId, jobId);
+    const scope = opened.scope;
+    page = opened.page;        // 새 창으로 열렸으면 그쪽을 쓴다.
 
-    const scope = await resolveEditorScope(page);
     await dismissPopups(scope);
 
     const { locator: titleField } = await findFirst(scope, SELECTORS.title, 15000);
@@ -238,7 +299,9 @@ export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
     error.screenshot = shot;
     throw error;
   } finally {
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(800).catch(() => {});
+    // 글쓰기가 새 창으로 열렸다면 처음 열었던 창도 같이 닫는다.
     await page.close().catch(() => {});
+    if (opener !== page) await opener.close().catch(() => {});
   }
 }

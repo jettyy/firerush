@@ -128,11 +128,21 @@ export async function verifySession({ headless = true } = {}) {
     const loggedIn = await hasNaverCookies(ctx);
     if (!loggedIn) return writeSessionInfo({ loggedIn: false });
 
-    const settings = getSettings();
-    let blogId = settings.blogId || readSessionInfo().blogId || '';
-    if (!blogId) {
-      blogId = await detectBlogId(page);
-      if (blogId) saveSettings({ blogId });
+    // 블로그 아이디는 항상 다시 확인한다.
+    // 저장된 값을 그대로 쓰면 다른 계정으로 로그인했을 때 이전 계정의
+    // 블로그로 글쓰기를 시도하게 되고, 남의 블로그에는 쓸 수 없으니
+    // 글쓰기 화면 대신 그냥 블로그 홈이 뜬다.
+    const saved = getSettings().blogId || '';
+    const detected = await detectBlogId(page).catch(() => '');
+    const blogId = detected || saved;
+
+    if (detected && detected !== saved) {
+      saveSettings({ blogId: detected });
+      logger.info(
+        saved
+          ? `블로그 아이디가 바뀌었습니다: ${saved} → ${detected}`
+          : `블로그 아이디를 확인했습니다: ${detected}`,
+      );
     }
     return writeSessionInfo({ loggedIn: true, blogId });
   } catch (error) {
@@ -161,17 +171,28 @@ export async function openLoginWindow({ timeoutMs = 300000 } = {}) {
     if (page.isClosed()) break;
     if (await hasNaverCookies(ctx).catch(() => false)) {
       logger.info('로그인 성공. 세션을 저장합니다.');
-      let blogId = getSettings().blogId;
-      if (!blogId) {
-        blogId = await detectBlogId(page).catch(() => '');
-        if (blogId) {
-          saveSettings({ blogId });
-          logger.info(`블로그 아이디를 확인했습니다: ${blogId}`);
-        } else {
-          logger.warn('블로그 아이디를 자동으로 찾지 못했습니다. 설정에서 직접 입력해 주세요.');
-        }
+
+      // 계정을 바꿔 로그인했을 수 있으니 블로그 아이디를 항상 새로 확인한다.
+      const saved = getSettings().blogId || '';
+      const detected = await detectBlogId(page).catch(() => '');
+
+      if (detected) {
+        saveSettings({ blogId: detected });
+        logger.info(
+          saved && saved !== detected
+            ? `블로그 아이디가 바뀌었습니다: ${saved} → ${detected}`
+            : `블로그 아이디를 확인했습니다: ${detected}`,
+        );
+      } else if (saved) {
+        logger.warn(
+          `블로그 아이디를 자동으로 찾지 못해 이전 값(${saved})을 그대로 씁니다. ` +
+          `계정을 바꾸셨다면 설정에서 직접 고쳐주세요.`,
+        );
+      } else {
+        logger.warn('블로그 아이디를 자동으로 찾지 못했습니다. 설정에서 직접 입력해 주세요.');
       }
-      const info = writeSessionInfo({ loggedIn: true, blogId });
+
+      const info = writeSessionInfo({ loggedIn: true, blogId: detected || saved });
       await page.close().catch(() => {});
       return info;
     }
@@ -187,6 +208,9 @@ export async function logout() {
   await closeContext();
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
   fs.rmSync(SESSION_FILE, { force: true });
-  logger.info('저장된 네이버 세션을 삭제했습니다.');
-  return push('session', { loggedIn: false, blogId: getSettings().blogId });
+  // 블로그 아이디도 같이 비운다. 남겨두면 다음에 다른 계정으로 로그인했을 때
+  // 이전 계정의 블로그로 글쓰기를 시도하게 된다.
+  saveSettings({ blogId: '' });
+  logger.info('저장된 네이버 세션과 블로그 아이디를 삭제했습니다.');
+  return push('session', { loggedIn: false, blogId: '' });
 }

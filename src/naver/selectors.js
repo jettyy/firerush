@@ -55,6 +55,16 @@ export const SELECTORS = {
     'button.se-popup-button-cancel',
   ],
 
+  // 블로그 홈에서 글쓰기로 들어가는 링크 (주소로 바로 못 갔을 때의 마지막 수단)
+  writeLink: [
+    'a[href*="PostWriteForm"]',
+    'a[href*="postwrite"]',
+    'a[href*="Redirect=Write"]',
+    '.btn_write',
+    'a:text-is("글쓰기")',
+    'a[title="글쓰기"]',
+  ],
+
   // 처음 진입 시 뜨는 도움말 패널 닫기
   helpPanelClose: [
     '.se-help-panel-close-button',
