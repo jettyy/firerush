@@ -118,14 +118,14 @@ async function loop() {
   // 계정을 바꿔 로그인했을 수 있으니 시작 전에 블로그 아이디를 다시 맞춘다.
   // 이전 계정의 아이디로 글쓰기를 시도하면 남의 블로그가 열려 아무것도 못 한다.
   try {
-    const info = await verifySession({ headless: getSettings().run.headless });
-    if (!info.loggedIn) {
-      logger.error('네이버 로그인이 풀렸습니다. 다시 로그인한 뒤 실행해 주세요.');
-      state.running = false;
-      broadcast();
-      return;
+    const info = await verifySession();
+    if (info.loggedIn) {
+      logger.info(`대상 블로그: ${info.blogId || '(아이디 미확인)'}`);
+    } else {
+      // 확인이 어긋났다고 실행 자체를 막지는 않는다.
+      // 정말 로그아웃이면 첫 글에서 분명한 오류가 나고, 연속 실패 차단이 멈춰준다.
+      logger.warn('로그인 상태를 확인하지 못했습니다. 그대로 진행해 봅니다.');
     }
-    logger.info(`대상 블로그: ${info.blogId || '(아이디 미확인)'}`);
   } catch (error) {
     logger.warn(`시작 전 세션 확인을 건너뜁니다: ${error.message}`);
   }

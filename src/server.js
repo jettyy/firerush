@@ -82,7 +82,8 @@ app.post('/api/login', wrap(async (req, res) => {
 }));
 
 app.post('/api/login/verify', wrap(async (req, res) => {
-  res.json({ ok: true, session: await verifySession({ headless: true }) });
+  // headless 를 지정하지 않아야 로그인할 때와 같은 모드로 확인한다.
+  res.json({ ok: true, session: await verifySession() });
 }));
 
 app.post('/api/logout', wrap(async (req, res) => {
@@ -230,9 +231,14 @@ const server = app.listen(PORT, HOST, () => {
   const { total, pending } = stats();
   logger.info(`저장된 주제 ${total}건 (대기 ${pending}건)`);
   ensureBrowsers().catch((error) => logger.error(`크로미움 준비 실패: ${error.message}`));
-  verifySession({ headless: true }).catch((error) => {
-    logger.warn(`시작할 때 세션 확인을 건너뛰었습니다: ${error.message}`);
-  });
+
+  // 시작할 때 브라우저를 띄워 세션을 확인하지 않는다.
+  // 로그인할 때와 모드가 달라 프로필을 다시 여는 과정에서 세션이 끊긴 적이 있다.
+  // 저장된 상태를 그대로 보여주고, 확인은 [세션 확인] 버튼과 실행 시작 때만 한다.
+  const session = readSessionInfo();
+  logger.info(session.loggedIn
+    ? `저장된 네이버 세션 있음${session.blogId ? ` · ${session.blogId}` : ''}`
+    : '네이버 로그인이 필요합니다.');
 });
 
 server.on('error', (error) => {

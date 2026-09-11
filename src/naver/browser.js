@@ -21,7 +21,15 @@ export async function getContext({ headless } = {}) {
   const wantHeadless = headless ?? settings.run.headless;
 
   if (context && contextHeadless === wantHeadless) return context;
-  if (context) await closeContext();
+  if (context) {
+    // 모드를 바꾸면 같은 프로필로 브라우저를 다시 띄운다.
+    // 흔한 일은 아니어야 하므로 로그에 남겨둔다. 세션이 끊기면 여기가 단서다.
+    logger.warn(
+      `브라우저를 ${contextHeadless ? '숨김' : '창 보임'} → ${wantHeadless ? '숨김' : '창 보임'} ` +
+      `모드로 다시 엽니다.`,
+    );
+    await closeContext();
+  }
 
   await ensureBrowsers();
   ensureDirs();
@@ -117,16 +125,31 @@ export async function detectBlogId(page) {
 }
 
 /** 저장된 세션이 아직 유효한지 확인하고 상태를 갱신한다. */
-export async function verifySession({ headless = true } = {}) {
+export async function verifySession({ headless } = {}) {
   if (!fs.existsSync(PROFILE_DIR)) {
     return writeSessionInfo({ loggedIn: false, blogId: '' });
   }
-  const ctx = await getContext({ headless });
+
+  // headless 를 지정하지 않는다. 설정에 저장된 모드를 그대로 쓴다.
+  // 모드가 다르면 getContext 가 브라우저를 닫고 같은 프로필로 다시 띄우는데,
+  // 그 과정에서 네이버 세션이 끊기는 일이 있었다.
+  const ctx = await getContext(headless === undefined ? {} : { headless });
   const page = await ctx.newPage();
   try {
     await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
-    const loggedIn = await hasNaverCookies(ctx);
-    if (!loggedIn) return writeSessionInfo({ loggedIn: false });
+
+    // 쿠키는 화면이 뜬 직후 잠깐 비어 보일 수 있다. 한 번 어긋났다고
+    // 로그아웃으로 단정하면 실행 버튼까지 막히므로 몇 번 더 확인한다.
+    let loggedIn = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      loggedIn = await hasNaverCookies(ctx).catch(() => false);
+      if (loggedIn) break;
+      await page.waitForTimeout(1200);
+    }
+    if (!loggedIn) {
+      logger.warn('네이버 로그인 쿠키를 찾지 못했습니다. 다시 로그인해 주세요.');
+      return writeSessionInfo({ loggedIn: false });
+    }
 
     // 블로그 아이디는 항상 다시 확인한다.
     // 저장된 값을 그대로 쓰면 다른 계정으로 로그인했을 때 이전 계정의
@@ -146,7 +169,8 @@ export async function verifySession({ headless = true } = {}) {
     }
     return writeSessionInfo({ loggedIn: true, blogId });
   } catch (error) {
-    logger.warn(`세션 확인 중 오류: ${error.message}`);
+    // 확인에 실패했다고 멀쩡한 세션을 로그아웃으로 바꾸지 않는다.
+    logger.warn(`세션 확인을 건너뜁니다 (${error.message}). 저장된 상태를 그대로 씁니다.`);
     return readSessionInfo();
   } finally {
     await page.close().catch(() => {});
