@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright';
 import { ensureBrowsers, withExecutable } from '../lib/playwright.js';
-import { PROFILE_DIR, SESSION_FILE, ensureDirs } from '../lib/paths.js';
+import { PROFILE_DIR, SESSION_FILE, STORAGE_FILE, ensureDirs } from '../lib/paths.js';
 import { getSettings, saveSettings } from '../lib/settings.js';
 import { logger, push } from '../lib/events.js';
 
@@ -60,6 +60,12 @@ export async function getContext({ headless } = {}) {
     contextHeadless = null;
   });
 
+  // 프로필에 로그인 쿠키가 없으면 따로 보관해둔 것을 넣어준다.
+  if (!(await hasNaverCookies(context).catch(() => false))) {
+    const restored = await restoreCookies(context);
+    if (restored) logger.info('저장해둔 네이버 쿠키를 되살렸습니다.');
+  }
+
   return context;
 }
 
@@ -92,6 +98,45 @@ export async function hasNaverCookies(ctx) {
   const cookies = await ctx.cookies('https://www.naver.com');
   const names = new Set(cookies.map((c) => c.name));
   return names.has('NID_AUT') && names.has('NID_SES');
+}
+
+/**
+ * 쿠키를 파일로 따로 보관한다.
+ *
+ * 크로미움은 프로필 폴더에 쿠키를 곧바로 쓰지 않는다. 브라우저가 정상적으로
+ * 닫혀야 기록되는데, 사용자가 로그인 창을 X 로 닫으면 그 과정이 생략돼
+ * 다음에 띄웠을 때 로그인이 풀린 창이 뜬다. 그래서 따로 받아 두었다가
+ * 프로필에 없으면 되살린다.
+ */
+async function saveCookies(ctx) {
+  try {
+    const cookies = await ctx.cookies();
+    if (!cookies.length) return false;
+    ensureDirs();
+    fs.writeFileSync(STORAGE_FILE, JSON.stringify({ cookies }, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    logger.warn(`쿠키를 저장하지 못했습니다: ${error.message}`);
+    return false;
+  }
+}
+
+async function restoreCookies(ctx) {
+  if (!fs.existsSync(STORAGE_FILE)) return false;
+  try {
+    const { cookies } = JSON.parse(fs.readFileSync(STORAGE_FILE, 'utf8'));
+    if (!Array.isArray(cookies) || !cookies.length) return false;
+
+    const now = Date.now() / 1000;
+    const alive = cookies.filter((cookie) => !cookie.expires || cookie.expires < 0 || cookie.expires > now);
+    if (!alive.length) return false;
+
+    await ctx.addCookies(alive);
+    return true;
+  } catch (error) {
+    logger.warn(`저장해둔 쿠키를 되살리지 못했습니다: ${error.message}`);
+    return false;
+  }
 }
 
 /** 로그인한 계정의 블로그 아이디를 알아낸다. */
@@ -167,6 +212,7 @@ export async function verifySession({ headless } = {}) {
           : `블로그 아이디를 확인했습니다: ${detected}`,
       );
     }
+    await saveCookies(ctx);
     return writeSessionInfo({ loggedIn: true, blogId });
   } catch (error) {
     // 확인에 실패했다고 멀쩡한 세션을 로그아웃으로 바꾸지 않는다.
@@ -217,7 +263,14 @@ export async function openLoginWindow({ timeoutMs = 300000 } = {}) {
       }
 
       const info = writeSessionInfo({ loggedIn: true, blogId: detected || saved });
+
+      // 쿠키를 따로 받아두고 브라우저를 정상적으로 닫는다.
+      // 정상 종료를 해야 프로필 폴더에도 쿠키가 기록된다. 창을 그냥 띄워두면
+      // 나중에 실행할 때 로그인이 풀린 창이 뜬다.
+      await saveCookies(ctx);
       await page.close().catch(() => {});
+      await closeContext();
+      logger.info('로그인 정보를 저장하고 창을 닫았습니다.');
       return info;
     }
     await new Promise((r) => setTimeout(r, 2000));
@@ -232,6 +285,7 @@ export async function logout() {
   await closeContext();
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
   fs.rmSync(SESSION_FILE, { force: true });
+  fs.rmSync(STORAGE_FILE, { force: true });
   // 블로그 아이디도 같이 비운다. 남겨두면 다음에 다른 계정으로 로그인했을 때
   // 이전 계정의 블로그로 글쓰기를 시도하게 된다.
   saveSettings({ blogId: '' });

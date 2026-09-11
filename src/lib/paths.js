@@ -17,6 +17,7 @@ export const LOG_DIR = path.join(DATA_DIR, 'logs');
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 export const SESSION_FILE = path.join(DATA_DIR, 'naver-session.json');
+export const STORAGE_FILE = path.join(DATA_DIR, 'naver-cookies.json');
 
 export function ensureDirs() {
   for (const dir of [DATA_DIR, THUMB_DIR, SHOT_DIR, OUTPUT_DIR, EXAMPLE_DIR, LOG_DIR]) {

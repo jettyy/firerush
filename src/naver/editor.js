@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { SELECTORS, findFirst, clickIfPresent } from './selectors.js';
-import { getContext } from './browser.js';
+import { getContext, hasNaverCookies } from './browser.js';
 import { getSettings } from '../lib/settings.js';
 import { SHOT_DIR, ensureDirs } from '../lib/paths.js';
 import { logger } from '../lib/events.js';
@@ -250,6 +250,16 @@ export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
   if (!blogId) throw new Error('블로그 아이디가 없습니다. 로그인하거나 설정에서 입력해 주세요.');
 
   const context = await getContext();
+
+  // 로그인이 안 된 채로 진행하면 글쓰기 대신 로그인 화면이 떠서
+  // 무슨 일이 난 건지 알기 어렵다. 먼저 확인하고 분명하게 알린다.
+  if (!(await hasNaverCookies(context).catch(() => false))) {
+    throw new Error(
+      '브라우저에 네이버 로그인이 되어 있지 않습니다. ' +
+      '대시보드에서 [세션 삭제] 후 [네이버 로그인 창 열기]로 다시 로그인해 주세요.',
+    );
+  }
+
   const opener = await context.newPage();
   opener.setDefaultTimeout(30000);
   let page = opener;
