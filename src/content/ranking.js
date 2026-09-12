@@ -2,32 +2,33 @@ import { runClaudeJson } from '../ai/claude.js';
 import { logger } from '../lib/events.js';
 
 /**
- * "TOP100 순위" 같은 주제를 다루기 위한 모듈.
+ * 주제의 "모양"을 정하는 모듈.
  *
- * 한 번의 호출로 100행짜리 표를 받으려고 하면 모델이 중간에 "이하 생략" 하거나
- * 출력 길이에 걸려 잘린다. 그래서 표는 구간을 나눠 여러 번 받아 이어 붙이고,
+ * 품질 규칙은 "각 항목마다 상세 설명 / 특징 / 장단점 / 팁을 구체적으로 쓸 것" 을
+ * 요구한다. 그래서 항목이 몇 개냐에 따라 글의 구조를 다르게 잡아야 한다.
+ *
+ *   - TOP 5, 7가지 처럼 항목이 적으면  → 항목마다 섹션 하나 + 세부 소제목 (items)
+ *   - TOP 50, 100가지 처럼 많으면       → 큰 표 하나 + 대표 항목만 상세 (table)
+ *   - 개수가 없는 일반 정보성 주제        → 소제목 중심 (general)
+ *
+ * 표를 100행 받는 일은 한 번의 호출로 안 된다. 모델이 "이하 생략" 하거나
+ * 출력 길이에 걸려 잘리기 때문에 구간을 나눠 받아 이어 붙이고,
  * 빠진 순위가 있으면 그 구간만 다시 받는다.
  */
 
-/**
- * claude -p 는 호출 한 번당 CLI 자체 시스템 프롬프트로만 3만 토큰 넘게 쓴다.
- * 그래서 토큰과 시간을 줄이는 가장 큰 지렛대는 "호출 횟수를 줄이는 것" 이다.
- * 한 번에 받는 행 수를 늘려 호출을 줄인다.
- */
+/** 이 개수까지는 항목마다 상세 섹션을 쓴다. 넘어가면 글이 감당이 안 된다. */
+export const ITEM_LIMIT = 12;
+
+/** 표 행만 나눠 받을 때 한 번에 요청하는 행 수. */
 const CHUNK_SIZE = 50;
 const MAX_COUNT = 200;
-
-/** 이 개수까지는 본문과 표를 한 번의 호출로 같이 받는다. */
-export const SINGLE_CALL_LIMIT = 40;
 
 /** 표 행만 뽑는 호출에는 블로그 작법 지시가 필요 없다. 짧을수록 싸고 빠르다. */
 const ROW_SYSTEM = '표 데이터를 JSON 으로만 출력합니다. 설명을 붙이지 않습니다.';
 
-/** 주제 문자열에서 "몇 개짜리 순위 글인지" 알아낸다. */
-export function detectRanking(topic) {
+/** 주제 문자열에서 "몇 개짜리 글인지" 알아낸다. */
+export function detectCount(topic) {
   const text = String(topic || '');
-  const isRankingWord = /(순위|랭킹|랭크|ranking|rank|top\s*-?\s*\d|베스트|best\s*\d)/i.test(text);
-
   const patterns = [
     /top\s*-?\s*(\d{1,3})/i,
     /best\s*-?\s*(\d{1,3})/i,
@@ -35,26 +36,33 @@ export function detectRanking(topic) {
     /(\d{1,3})\s*(?:위|가지|개|선|종|곳|대|강)\b/,
     /(\d{1,3})\s*(?:위|가지|개|선|종|곳|대|강)/,
   ];
-
-  let count = null;
   for (const pattern of patterns) {
     const matched = text.match(pattern);
     if (matched) {
       const parsed = Number(matched[1]);
-      if (Number.isFinite(parsed) && parsed >= 2 && parsed <= MAX_COUNT) {
-        count = parsed;
-        break;
-      }
+      if (Number.isFinite(parsed) && parsed >= 2 && parsed <= MAX_COUNT) return parsed;
     }
   }
+  return null;
+}
 
-  return {
-    isRanking: Boolean(isRankingWord || count),
-    count,
-    // 호출 한 번이 비싸므로 웬만하면 한 번에 받는다.
-    // 40개 정도까지는 본문과 같이 받아도 잘리지 않는다.
-    needsChunking: Boolean(count && count > SINGLE_CALL_LIMIT),
-  };
+/**
+ * 글의 모양을 정한다.
+ * @returns {{shape: 'items'|'table'|'general', count: number|null, needsChunking: boolean}}
+ */
+export function detectShape(topic) {
+  const text = String(topic || '');
+  const count = detectCount(text);
+  const rankingWord = /(순위|랭킹|랭크|ranking|rank|top\s*-?\s*\d|베스트|best\s*\d|추천|고르는|비교)/i.test(text);
+
+  if (count && count <= ITEM_LIMIT) {
+    return { shape: 'items', count, needsChunking: false };
+  }
+  if (count) {
+    return { shape: 'table', count, needsChunking: true };
+  }
+  // 개수가 없어도 "추천/비교" 성격이면 항목형이 자연스럽다. 개수는 AI 가 정한다.
+  return { shape: rankingWord ? 'items' : 'general', count: null, needsChunking: false };
 }
 
 function normalizeRows(rawRows, columnCount) {
@@ -89,15 +97,15 @@ function buildChunkPrompt({ topic, headers, start, end, existingNames }) {
   );
 
   return `주제: "${topic}"
-이 주제의 순위표에서 ${start}~${end}위, 정확히 ${expected}개 행을 채우세요.
+이 주제의 비교표에서 ${start}~${end}번, 정확히 ${expected}개 행을 채우세요.
 
 열: ${headers.join(' | ')}
 
 규칙
 - ${expected}개 행 전부 출력. "이하 생략", "...", "(중략)" 금지.
-- 첫 칸은 순위 숫자만 (${start}~${end}).
+- 첫 칸은 번호 숫자만 (${start}~${end}).
 - 각 행은 정확히 ${headers.length}칸, 빈 칸 없이.
-- 각 칸 20자 이내.
+- 각 칸 24자 이내. 특수문자와 이모지는 쓰지 마세요.
 - 공식 조사 결과가 아니라 널리 알려진 정보를 모은 참고용 표입니다. 실제 조사 수치는 지어내지 말고 일반적인 특징으로 채우세요.
 ${existingNames.length ? `- 이미 나온 항목 제외: ${existingNames.slice(-60).join(', ')}` : ''}
 
@@ -106,10 +114,10 @@ JSON 만 출력:
 }
 
 /**
- * 순위 표를 구간별로 나눠 받아 하나로 이어 붙인다.
+ * 큰 표를 구간별로 나눠 받아 하나로 이어 붙인다.
  * 빠진 구간은 한 번 더 요청해서 메운다.
  */
-export async function generateRankingRows({
+export async function generateTableRows({
   topic,
   headers,
   count,
@@ -128,7 +136,7 @@ export async function generateRankingRows({
 
     for (const row of normalizeRows(reply.data?.rows, columnCount)) {
       const rank = rankOf(row);
-      // 범위 밖이거나 순위를 못 읽은 행은 버린다. 순서가 꼬이는 것보다 낫다.
+      // 범위 밖이거나 번호를 못 읽은 행은 버린다. 순서가 꼬이는 것보다 낫다.
       if (rank === null || rank < 1 || rank > count) continue;
       row[0] = String(rank);
       byRank.set(rank, row);
@@ -139,17 +147,17 @@ export async function generateRankingRows({
     const end = Math.min(start + CHUNK_SIZE - 1, count);
     await fetchRange(start, end);
     onProgress?.({ filled: byRank.size, total: count });
-    logger.info(`순위 표 ${start}~${end}위 생성 (누적 ${byRank.size}/${count}개)`);
+    logger.info(`비교표 ${start}~${end}번 생성 (누적 ${byRank.size}/${count}개)`);
   }
 
-  // 빠진 순위를 연속 구간으로 묶어 한 번씩만 다시 요청한다.
+  // 빠진 번호를 연속 구간으로 묶어 한 번씩만 다시 요청한다.
   const missing = [];
   for (let rank = 1; rank <= count; rank += 1) {
     if (!byRank.has(rank)) missing.push(rank);
   }
 
   if (missing.length) {
-    logger.warn(`순위 ${missing.length}개가 비어 다시 채웁니다: ${missing.slice(0, 15).join(', ')}${missing.length > 15 ? ' ...' : ''}`);
+    logger.warn(`${missing.length}개 행이 비어 다시 채웁니다: ${missing.slice(0, 15).join(', ')}${missing.length > 15 ? ' ...' : ''}`);
     const ranges = [];
     let head = missing[0];
     let prev = missing[0];
@@ -165,7 +173,7 @@ export async function generateRankingRows({
       try {
         await fetchRange(start, end);
       } catch (error) {
-        logger.warn(`${start}~${end}위 재생성 실패: ${error.message}`);
+        logger.warn(`${start}~${end}번 재생성 실패: ${error.message}`);
       }
     }
   }

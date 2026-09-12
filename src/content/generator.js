@@ -2,30 +2,35 @@ import { runClaudeJson } from '../ai/claude.js';
 import { getSettings } from '../lib/settings.js';
 import { logger } from '../lib/events.js';
 import { buildExampleBlock } from './examples.js';
-import { detectRanking, generateRankingRows } from './ranking.js';
+import { detectShape, generateTableRows, ITEM_LIMIT } from './ranking.js';
+import {
+  buildRuleBlock, buildRepairBlock, checkCompliance, countChars, summarize,
+} from './quality.js';
 
 const BASE_SYSTEM = [
-  '당신은 네이버 블로그에서 꾸준히 상위에 노출되는 한국어 블로그 작가입니다.',
-  '검색 유입을 노리되 광고처럼 들리지 않고, 실제 경험담처럼 자연스럽게 씁니다.',
-  '문단은 짧게 끊고, 소제목으로 흐름을 잡고, 핵심은 굵게 강조합니다.',
-  '사실이 확실하지 않은 수치나 고유명사는 지어내지 않습니다.',
+  '당신은 네이버 블로그에서 꾸준히 상위에 노출되는 전문 카피라이터입니다.',
+  '검색 알고리즘이 "고품질의 정보성 글"로 인식할 만큼 깊이 있고 구조화된 한국어 포스팅을 씁니다.',
+  '단순 나열 대신 근거와 맥락을 붙이고, 확실하지 않은 수치나 고유명사는 지어내지 않습니다.',
+  '특수문자와 이모지를 쓰지 않고 깔끔한 텍스트로만 씁니다.',
   '요청받은 JSON 형식만 정확히 출력합니다.',
 ].join(' ');
 
 /**
  * 사용자 지침을 프롬프트 맨 앞에 놓는 블록.
- * 예전에는 [글의 조건] 목록 끝에 한 줄로 붙어 있어서 고정 규칙에 묻혔다.
- * 이제는 별도 최상위 섹션으로 올리고, 충돌 시 우선한다고 명시한다.
+ * 고정 규칙 목록 끝에 한 줄로 붙으면 묻히기 때문에 별도 최상위 섹션으로 올린다.
+ *
+ * 다만 품질 필수 규칙보다는 아래에 둔다. 이 프로그램의 목적 자체가
+ * "좋은 글" 이라서, 규칙을 깨는 지침까지 이기게 하면 프로그램이 무의미해진다.
  */
 export function buildGuidelineBlock(guideline) {
   const text = String(guideline || '').trim();
   if (!text) return '';
-  return `[사용자 지침 — 최우선 / 반드시 지킬 것]
-아래는 이 글에서 가장 중요한 요구사항입니다.
-뒤에 나오는 어떤 기본 규칙과 충돌하더라도 이 지침을 우선하세요.
-지침을 지키지 않은 결과물은 실패로 처리됩니다.
+  return `[사용자 지침 — 반드시 반영할 것]
+아래는 사용자가 이 글에 직접 요구한 내용입니다.
+일반적인 작성 요령과 충돌하면 이 지침을 우선하세요.
+(단, 뒤에 나오는 "필수 준수 규칙"만은 어길 수 없습니다. 둘 다 만족시키세요.)
 
-${text.split('\n').map((line) => (line.trim() ? `▶ ${line.trim()}` : '')).filter(Boolean).join('\n')}
+${text.split('\n').map((line) => (line.trim() ? `- ${line.trim()}` : '')).filter(Boolean).join('\n')}
 
 ============================================================
 
@@ -51,122 +56,168 @@ function buildSystemPrompt(guideline) {
   const text = String(guideline || '').trim();
   if (!text) return BASE_SYSTEM;
   return (
-    `${BASE_SYSTEM} 사용자가 직접 준 지침이 있으면 그것이 최우선이며, ` +
-    `기본 작성 규칙과 충돌할 때는 언제나 사용자 지침을 따릅니다. ` +
-    `이번 사용자 지침: ${text.replace(/\s+/g, ' ').slice(0, 500)}`
+    `${BASE_SYSTEM} 사용자가 직접 준 지침이 있으면 그것을 반영하되, `
+    + `필수 준수 규칙은 어떤 경우에도 지킵니다. `
+    + `이번 사용자 지침: ${text.replace(/\s+/g, ' ').slice(0, 500)}`
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* 프롬프트                                                             */
+/* 프롬프트 조각                                                        */
 /* ------------------------------------------------------------------ */
 
-function conditionsBlock(settings, ranking) {
-  const { tone, targetChars, sectionCount, audience } = settings.post;
-  const lines = [
-    '[기본 규칙] (사용자 지침과 충돌하면 지침 우선)',
-    `- 말투: ${tone} / 독자: ${audience}`,
-    `- 본문 분량: 공백 포함 ${targetChars}자 내외. 넘기지 마세요. (표는 분량에서 제외)`,
-    `- 소제목 ${sectionCount}개, 소제목마다 문단 2개`,
-    '- 문단은 2~3문장으로 짧게. 제목은 32자 이내.',
-    '- 문단마다 핵심 표현 한둘을 <b>강조</b>로 감싸기. 다른 HTML 태그 금지.',
-    '- 과장 광고 표현 금지.',
-  ];
-
-  if (ranking?.isRanking) {
-    // 순위 글의 핵심은 표다. 본문은 짧게 가야 토큰과 시간이 줄어든다.
-    lines.push('- 본문은 표를 보조하는 역할입니다. 짧고 담백하게, 개별 항목 나열은 하지 마세요.');
-    // 공식 순위가 없는 주제가 대부분이다. 없는 조사 결과를 사실처럼 쓰라고 하면
-    // 모델이 (당연히) 거절한다. 처음부터 "참고용 정리" 로 정직하게 틀을 잡는다.
-    lines.push(
-      '- 이 표는 공식 조사 결과가 아니라 일반적으로 알려진 정보를 모아 정리한 ' +
-      '**참고용 자료**입니다. 실제 조사 수치를 지어내지 말고, 널리 알려진 특징 위주로 채우세요.',
-    );
-    lines.push(
-      '- table.note 에는 "공식 순위가 아니라 일반적인 정보를 참고해 정리한 자료이며 ' +
-      '최신 정보는 직접 확인이 필요하다"는 안내를 반드시 넣으세요.',
-    );
-    lines.push('- 순서는 절대적인 우열이 아니라 소개 순서로 다루세요.');
-  } else {
-    lines.push('- 확실하지 않은 수치·고유명사는 지어내지 마세요.');
-    lines.push('- 한 섹션에는 항목 목록(list), 다른 섹션에는 인용구(quote)를 넣으세요.');
-  }
-  return lines.join('\n');
+function basicsBlock(settings, topic) {
+  const { tone, audience, sectionCount, minChars } = settings.post;
+  return [
+    '[포스팅 기본 정보]',
+    `- 주제: ${topic}`,
+    `- 타겟 독자: ${audience}`,
+    `- 어조: ${tone}`,
+    `- 목표 분량: 공백 제외 ${minChars.toLocaleString()}자 이상 (넘겨도 좋습니다)`,
+    `- 소제목: ${sectionCount}개 내외`,
+  ].join('\n');
 }
 
 const THUMBNAIL_BLOCK = `[썸네일 문구]
 - headline: 18자 이내 / subline: 30자 이내 / badge: 6자 이내
 - style: bold, gradient, minimal, editorial 중 하나
-- accent: 어두운 계열 HEX (흰 글씨가 올라갑니다) / emoji: 1개`;
+- accent: 어두운 계열 HEX (흰 글씨가 올라갑니다)
+- 썸네일 문구에도 특수문자와 이모지를 쓰지 마세요.`;
 
-/** 표를 한 번에 받아도 되는 보통 글용 프롬프트. */
-function buildStandardPrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }) {
-  const tableHint = ranking?.isRanking
-    ? `
+function metaBlock() {
+  return `[태그]
+- tags: 3~6개. 네이버 블로그 해시태그로 씁니다. 한 단어~두 단어의 일반적인 분류어로 쓰세요.`;
+}
 
-[표 — 이 글의 핵심입니다. 여기에 공을 들이세요]
-- table 필드를 반드시 채우세요. 열은 3개 (순위 | 이름 | 특징) 를 권합니다.
-- ${ranking.count ? `정확히 ${ranking.count}개 행` : '주제가 요구하는 모든 항목'}을 빠짐없이 넣으세요.
-- "이하 생략", "...", "(중략)" 금지. 각 칸 20자 이내.`
-    : `
+/** 표를 한 번에 받아도 되는 글용 JSON 형식 안내. */
+function jsonShape({ withItems, withCriteria, withTableRows }) {
+  const criteria = withCriteria
+    ? `\n  "criteria": {
+    "heading": "추천 항목을 고른 세 가지 기준",
+    "paragraphs": ["기준을 왜 이렇게 잡았는지 설명하는 완전한 문장 2~3개입니다."],
+    "items": ["첫 번째 기준: 왜 이 기준을 봤는지 설명입니다.", "두 번째 기준: 왜 이 기준을 봤는지 설명입니다."]
+  },`
+    : '';
 
-[표 — 필요할 때만]
-- 비교·순위처럼 표가 읽기 좋은 내용이면 table 을 채우고, 아니면 키를 빼세요.`;
+  const table = withTableRows
+    ? `\n  "table": {"heading":"한눈에 보는 비교표","headers":["구분","항목","핵심 특징","난이도"],"rows":[["1","항목 이름","특징","보통"]],"note":"표 아래 안내 한 줄입니다."},`
+    : `\n  "table": {"heading":"한눈에 보는 비교표","headers":["구분","항목","핵심 특징","난이도"],"note":"표 아래 안내 한 줄입니다."},`;
 
-  return `${guidelineBlock}주제: "${topic}"
+  const section = withItems
+    ? `{
+      "heading": "1위. 항목 이름",
+      "isItem": true,
+      "paragraphs": ["이 항목을 왜 먼저 다루는지 설명하는 문단입니다."],
+      "subsections": [
+        {"heading":"상세 설명","paragraphs":["..."]},
+        {"heading":"특징","paragraphs":["..."]},
+        {"heading":"장점과 단점","paragraphs":["..."], "list":["장점을 문장으로 씁니다.","단점도 솔직하게 적습니다."]},
+        {"heading":"이럴 때 추천합니다","paragraphs":["..."]}
+      ]
+    }`
+    : `{
+      "heading": "소제목",
+      "paragraphs": ["문단1","문단2"],
+      "list": ["핵심 포인트를 완전한 문장으로 정리합니다."],
+      "quote": "",
+      "subsections": [{"heading":"세부 소제목","paragraphs":["..."]}]
+    }`;
 
-위 주제로 네이버 블로그 글 한 편을 써주세요.
+  return `{
+  "title": "제목 (낚시성 없이 명확하게, 40자 이내)",
+  "summary": "한 줄 요약입니다.",
+  "tags": ["태그1","태그2","태그3"],
+  "guidelineCheck": "사용자 지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
+  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"minimal","accent":"#1F3A93"},
+  "intro": ["도입 문단1", "도입 문단2", "도입 문단3"],${criteria}${table}
+  "sections": [
+    ${section}
+  ],
+  "outro": ["글 전체를 요약하는 마무리 문단입니다.", "독자를 격려하는 문단입니다."]
+}`;
+}
 
-${conditionsBlock(settings, ranking)}
+function structureGuide(shape, settings, count) {
+  const lines = ['[글의 구조]'];
+  lines.push('- intro: 독자의 문제 상황에 공감하는 도입부 2~3문단. 인사말 없이 바로 본론으로 들어가세요.');
+  if (settings.post.addCriteria) {
+    lines.push('- criteria: 어떤 기준으로 골랐는지 밝히는 단락. 이 글의 신뢰도를 만드는 부분이라 반드시 채웁니다.');
+  }
+  lines.push('- table: 항목을 한눈에 비교하는 표. 열 3~5개.');
+
+  if (shape === 'items') {
+    lines.push(
+      `- sections: 항목 ${count ? `${count}개` : `${Math.min(5, settings.post.sectionCount + 1)}개 내외`}를 `
+      + '각각 하나의 섹션으로 다룹니다. isItem 을 true 로 두세요.',
+    );
+    lines.push('- 각 항목 섹션에는 세부 소제목을 최소 3개 넣습니다: 상세 설명 / 특징 / 장점과 단점 / 추천 대상');
+    lines.push('- 항목마다 단점과 주의점도 솔직하게 적으세요. 장점만 나열하면 광고성 글로 보입니다.');
+  } else if (shape === 'table') {
+    lines.push('- sections: 표를 읽는 법, 항목을 고르는 기준, 대표 항목 3~4개의 상세 설명으로 나눕니다.');
+    lines.push('- 대표 항목 섹션에는 세부 소제목(상세 설명 / 장단점 / 추천 대상)을 붙이세요.');
+  } else {
+    lines.push(`- sections: 소제목 ${settings.post.sectionCount}개. `
+      + '각 섹션에 세부 소제목을 1개 이상 붙여 내용을 나눕니다.');
+    lines.push('- 최소 한 섹션에는 불렛 포인트 목록(list)을 넣으세요.');
+  }
+
+  lines.push('- outro: 글 전체 내용을 요약하고 독자를 따뜻하게 독려하는 마무리 2문단.');
+  return lines.join('\n');
+}
+
+const HONESTY_BLOCK = [
+  '[사실관계]',
+  '- 실시간 검색을 할 수 없으므로, 공식 조사 수치나 연도별 통계를 지어내지 마세요.',
+  '- 순위는 절대적인 우열이 아니라 "널리 알려진 정보를 정리한 참고 순서" 로 다루세요.',
+  '- table.note 에는 "공식 순위가 아니라 일반적으로 알려진 정보를 정리한 참고 자료이며 '
+  + '최신 정보는 직접 확인이 필요하다"는 안내를 완전한 문장으로 넣으세요.',
+  '- 모르는 제도나 금액은 "지역과 시기에 따라 다릅니다" 처럼 정직하게 여지를 두고 쓰세요.',
+].join('\n');
+
+const FORMAT_BLOCK = [
+  '[서식]',
+  '- 문단 안에서 핵심 표현 한둘만 <b>강조</b>로 감쌀 수 있습니다. 그 외 HTML 태그는 쓰지 마세요.',
+  '- 마크다운 기호(#, *, -, |)를 문자열 안에 직접 넣지 마세요. 구조는 JSON 필드로만 표현합니다.',
+  '- 목록 항목과 표 칸도 특수문자 없이 씁니다.',
+].join('\n');
+
+/* ------------------------------------------------------------------ */
+/* 프롬프트 조립                                                        */
+/* ------------------------------------------------------------------ */
+
+function buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count }) {
+  const withTableRows = shape !== 'table';   // 큰 표는 뒤에서 따로 채운다.
+  const tableHint = withTableRows
+    ? `- table.rows 를 ${count ? `${count}개` : '항목 수만큼'} 빠짐없이 채우세요. "이하 생략" 금지.`
+    : `- 이 글에는 ${count}개 항목이 들어간 큰 표가 하나 들어갑니다. `
+      + '표의 행은 뒤에서 따로 채우므로 지금은 headers 와 heading, note 만 잡고 rows 는 넣지 마세요.';
+
+  return `${guidelineBlock}${basicsBlock(settings, topic)}
+
+위 주제로 네이버 블로그에 올릴 고품질 정보성 포스팅 한 편을 써주세요.
+
+${buildRuleBlock(settings, shape)}
+
+${structureGuide(shape, settings, count)}
 ${tableHint}
+
+${HONESTY_BLOCK}
+
+${FORMAT_BLOCK}
+
+${metaBlock()}
 
 ${THUMBNAIL_BLOCK}
 ${exampleBlock ? `\n${exampleBlock}\n` : ''}
 [출력] JSON 객체 하나만. 설명도 코드 펜스도 붙이지 마세요.
 
-{
-  "title": "제목", "summary": "한 줄 요약", "tags": ["태그1","태그2","태그3"],
-  "guidelineCheck": "지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
-  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"bold","accent":"#1F3A93","emoji":"📌"},
-  "intro": ["도입 문단1", "도입 문단2"],
-  "table": {"heading":"표 제목","headers":["순위","이름","특징"],"rows":[["1","이름","특징"]],"note":""},
-  "sections": [{"heading":"소제목","paragraphs":["문단1","문단2"],"list":[],"quote":""}],
-  "outro": ["마무리 문단"]
-}
+${jsonShape({
+    withItems: shape === 'items',
+    withCriteria: settings.post.addCriteria,
+    withTableRows,
+  })}
 
-list, quote, table 은 필요할 때만.${buildGuidelineReminder(settings.post.extraGuideline)}`;
-}
-
-/**
- * 큰 표가 필요한 글의 1단계: 표의 뼈대와 본문만 받는다.
- * 행은 ranking.js 가 구간을 나눠 따로 채운다.
- */
-function buildStructurePrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }) {
-  return `${guidelineBlock}주제: "${topic}"
-
-이 글에는 ${ranking.count}개 항목이 모두 들어간 큰 표가 하나 들어갑니다.
-표의 행은 뒤에서 따로 채우므로 **지금은 뼈대만** 잡아주세요.
-
-${conditionsBlock(settings, ranking)}
-
-[표 뼈대]
-- table.headers: 열 이름 3개. 첫 열은 반드시 "순위". 예) ["순위","이름","특징"]
-- table.heading: 표 위 소제목 / table.note: 표 아래 짧은 안내 한 줄
-- rows 는 넣지 마세요.
-
-${THUMBNAIL_BLOCK}
-${exampleBlock ? `\n${exampleBlock}\n` : ''}
-[출력] JSON 객체 하나만.
-
-{
-  "title": "제목", "summary": "한 줄 요약", "tags": ["태그1","태그2","태그3"],
-  "guidelineCheck": "지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
-  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"bold","accent":"#1F3A93","emoji":"📌"},
-  "intro": ["도입 문단1", "도입 문단2"],
-  "table": {"heading":"...","headers":["순위","이름","특징"],"note":"..."},
-  "sections": [{"heading":"소제목","paragraphs":["문단1","문단2"]}],
-  "outro": ["마무리 문단"]
-}${buildGuidelineReminder(settings.post.extraGuideline)}`;
+필요 없는 키는 빼도 되지만 title, intro, sections, outro, table 은 반드시 채우세요.${buildGuidelineReminder(settings.post.extraGuideline)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -208,14 +259,38 @@ function normalizeTable(raw) {
   };
 }
 
-function normalize(raw, topic, settings) {
+function normalizeSubsections(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .map((sub) => ({
+      heading: String(sub?.heading || '').trim(),
+      paragraphs: toParagraphList(sub?.paragraphs ?? sub?.body ?? sub?.content),
+      list: toParagraphList(sub?.list ?? sub?.items),
+    }))
+    .filter((sub) => sub.heading && (sub.paragraphs.length || sub.list.length));
+}
+
+function normalizeCriteria(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const criteria = {
+    heading: String(raw.heading || '추천 항목을 고른 기준').trim(),
+    paragraphs: toParagraphList(raw.paragraphs ?? raw.body),
+    items: toParagraphList(raw.items ?? raw.list),
+  };
+  if (!criteria.paragraphs.length && !criteria.items.length) return null;
+  return criteria;
+}
+
+export function normalize(raw, topic, settings, shape = 'general') {
   const title = String(raw.title || topic).trim().slice(0, 100);
+
   const sections = (Array.isArray(raw.sections) ? raw.sections : [])
     .map((section) => ({
-      heading: String(section.heading || '').trim(),
-      paragraphs: toParagraphList(section.paragraphs ?? section.body ?? section.content),
-      list: toParagraphList(section.list ?? section.items),
-      quote: String(section.quote || '').trim(),
+      heading: String(section?.heading || '').trim(),
+      isItem: Boolean(section?.isItem),
+      paragraphs: toParagraphList(section?.paragraphs ?? section?.body ?? section?.content),
+      list: toParagraphList(section?.list ?? section?.items),
+      quote: String(section?.quote || '').trim(),
+      subsections: normalizeSubsections(section?.subsections ?? section?.sub),
     }))
     .filter((section) => section.heading || section.paragraphs.length);
 
@@ -224,19 +299,19 @@ function normalize(raw, topic, settings) {
   const style = requested !== 'auto' && STYLES.has(requested)
     ? requested
     : (STYLES.has(thumb.style) ? thumb.style : 'bold');
-
   const accent = /^#[0-9a-f]{6}$/i.test(String(thumb.accent || '')) ? thumb.accent : '#16324F';
 
   const post = {
     topic,
+    shape,
     title,
     summary: String(raw.summary || '').trim(),
     guideline: String(settings.post.extraGuideline || '').trim(),
     guidelineCheck: String(raw.guidelineCheck || '').trim(),
     tags: (Array.isArray(raw.tags) ? raw.tags : [])
-      .map((tag) => String(tag).replace(/^#/, '').trim())
+      .map((tag) => String(tag).replace(/^#/, '').replace(/,/g, ' ').trim())
       .filter(Boolean)
-      .slice(0, 10),
+      .slice(0, 8),
     thumbnail: {
       headline: String(thumb.headline || title).trim().slice(0, 40),
       subline: String(thumb.subline || raw.summary || '').trim().slice(0, 60),
@@ -246,39 +321,125 @@ function normalize(raw, topic, settings) {
       accent,
     },
     intro: toParagraphList(raw.intro),
+    criteria: settings.post.addCriteria ? normalizeCriteria(raw.criteria) : null,
     table: normalizeTable(raw.table),
     sections,
     outro: toParagraphList(raw.outro),
     model: '',
     costUsd: 0,
+    compliance: null,
+    repairs: 0,
   };
 
   if (!post.intro.length && post.sections.length) {
     // 도입부가 비면 썸네일이 들어갈 자리가 없어진다. 첫 문단을 끌어올린다.
     post.intro = post.sections[0].paragraphs.splice(0, 1);
   }
-  if (!post.sections.length && !post.table?.rows.length) {
+  if (!post.sections.length) {
     throw new Error('AI 응답에 본문 섹션이 없습니다.');
   }
   return post;
 }
 
-export function countChars(post) {
-  const parts = [
-    ...post.intro,
-    ...post.sections.flatMap((s) => [s.heading, ...s.paragraphs, ...s.list, s.quote]),
-    ...post.outro,
-  ];
-  if (post.table) {
-    parts.push(post.table.heading, post.table.note);
-    for (const row of post.table.rows) parts.push(...row);
-  }
-  return parts.join('').replace(/<\/?b>/g, '').length;
+/** 보정 요청에 되돌려 보낼 JSON. 내부 관리용 필드는 뺀다. */
+function toAiJson(post) {
+  const out = {
+    title: post.title,
+    summary: post.summary,
+    tags: post.tags,
+    guidelineCheck: post.guidelineCheck,
+    thumbnail: post.thumbnail,
+    intro: post.intro,
+    sections: post.sections.map((section) => ({
+      heading: section.heading,
+      ...(section.isItem ? { isItem: true } : {}),
+      paragraphs: section.paragraphs,
+      ...(section.list.length ? { list: section.list } : {}),
+      ...(section.quote ? { quote: section.quote } : {}),
+      ...(section.subsections.length ? { subsections: section.subsections } : {}),
+    })),
+    outro: post.outro,
+  };
+  if (post.criteria) out.criteria = post.criteria;
+  if (post.table) out.table = post.table;
+  return out;
 }
+
+export { countChars };
 
 /* ------------------------------------------------------------------ */
 /* 생성                                                                */
 /* ------------------------------------------------------------------ */
+
+/**
+ * 준수 검사에서 걸린 항목만 짚어 다시 쓰게 한다.
+ * 규칙이 통과할 때까지 최대 maxRepairs 번 돈다.
+ */
+async function repairUntilCompliant(post, { topic, settings, systemPrompt, signal, onProgress }) {
+  let current = post;
+  current.compliance = checkCompliance(current, settings);
+
+  if (current.compliance.ok || !settings.quality.enforce) return current;
+
+  const limit = Math.max(0, Number(settings.quality.maxRepairs) || 0);
+  for (let attempt = 1; attempt <= limit; attempt += 1) {
+    logger.warn(
+      `[${topic}] 품질 검사 미통과 (${attempt}/${limit} 보정 시도) — `
+      + current.compliance.issues.map((issue) => `${issue.label}: ${issue.detail}`).join(' / '),
+    );
+    onProgress?.(current.compliance);
+
+    const prompt = [
+      buildRepairBlock(current.compliance),
+      '',
+      '============================================================',
+      `주제: "${topic}"`,
+      '',
+      '[현재 글 — 이것을 고쳐서 전체를 다시 출력하세요]',
+      JSON.stringify(toAiJson(current), null, 2),
+      '',
+      buildRuleBlock(settings, current.shape),
+      '',
+      FORMAT_BLOCK,
+      '',
+      '[출력] 고친 글 전체를 같은 구조의 JSON 객체 하나로만 출력하세요.',
+    ].join('\n');
+
+    let reply;
+    try {
+      reply = await runClaudeJson(prompt, { systemPrompt, signal });
+    } catch (error) {
+      logger.warn(`[${topic}] 보정 요청 실패, 원래 글을 그대로 씁니다: ${error.message}`);
+      break;
+    }
+
+    let repaired;
+    try {
+      repaired = normalize(reply.data, topic, settings, current.shape);
+    } catch (error) {
+      logger.warn(`[${topic}] 보정 결과를 읽지 못했습니다: ${error.message}`);
+      break;
+    }
+
+    repaired.model = reply.model || current.model;
+    repaired.costUsd = (current.costUsd || 0) + (reply.costUsd || 0);
+    repaired.repairs = attempt;
+    repaired.compliance = checkCompliance(repaired, settings);
+
+    // 고친 결과가 더 나빠졌다면 되돌린다. (규칙 통과 개수로 판단)
+    if (repaired.compliance.passed < current.compliance.passed) {
+      logger.warn(`[${topic}] 보정 결과가 오히려 나빠져 이전 글을 유지합니다.`);
+      break;
+    }
+    current = repaired;
+    if (current.compliance.ok) {
+      logger.info(`[${topic}] 보정 후 품질 검사를 통과했습니다. (${summarize(current.compliance)})`);
+      break;
+    }
+  }
+
+  return current;
+}
 
 export async function generatePost(topic, options = {}) {
   const settings = getSettings();
@@ -286,29 +447,38 @@ export async function generatePost(topic, options = {}) {
   const guidelineBlock = buildGuidelineBlock(guideline);
   const exampleBlock = buildExampleBlock();
   const systemPrompt = buildSystemPrompt(guideline);
-  const ranking = detectRanking(topic);
+  const { shape, count, needsChunking } = detectShape(topic);
 
+  logger.step(
+    `[${topic}] 글 모양: ${
+      { items: '항목별 상세형', table: '대형 비교표형', general: '정보 정리형' }[shape]
+    }${count ? ` (${count}개 항목)` : ''}`,
+  );
   if (guideline) logger.info(`추가 지침 적용: ${guideline.replace(/\s+/g, ' ').slice(0, 120)}`);
   if (exampleBlock) logger.info('참고 예시를 프롬프트에 함께 넣었습니다.');
+  if (count && count > ITEM_LIMIT) {
+    logger.info(`항목이 ${count}개라 표를 나눠 받고 대표 항목만 상세하게 씁니다.`);
+  }
 
-  // 표가 큰 글은 뼈대와 행을 나눠 받는다. 한 번에 받으면 중간에 잘린다.
-  if (ranking.needsChunking) {
-    logger.step(`순위형 주제로 판단 (${ranking.count}개 항목). 표를 나눠서 받습니다.`);
+  const reply = await runClaudeJson(
+    buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count }),
+    { systemPrompt, signal: options.signal },
+  );
 
-    const structure = await runClaudeJson(
-      buildStructurePrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }),
-      { systemPrompt, signal: options.signal },
-    );
+  let post = normalize(reply.data, topic, settings, shape);
+  post.model = reply.model || '';
+  post.costUsd = reply.costUsd || 0;
 
-    const post = normalize(structure.data, topic, settings);
+  // 큰 표는 본문과 따로, 구간을 나눠 받는다.
+  if (needsChunking) {
     const headers = post.table?.headers?.length >= 2
       ? post.table.headers
-      : ['순위', '항목', '설명'];
+      : ['순위', '항목', '핵심 특징'];
 
-    const { rows, model, missing } = await generateRankingRows({
+    const { rows, model, missing } = await generateTableRows({
       topic,
       headers,
-      count: ranking.count,
+      count,
       signal: options.signal,
       onProgress: options.onProgress,
     });
@@ -317,34 +487,28 @@ export async function generatePost(topic, options = {}) {
       heading: post.table?.heading || `${topic} 전체 정리`,
       headers,
       rows,
-      note: post.table?.note || '',
+      note: post.table?.note
+        || '이 표는 공식 순위가 아니라 일반적으로 알려진 정보를 정리한 참고 자료이며, '
+          + '최신 정보는 직접 확인하시기 바랍니다.',
     };
-    post.model = structure.model || model || '';
-    post.costUsd = structure.costUsd || 0;
-    post.rankingExpected = ranking.count;
-    post.rankingMissing = missing;
+    post.model = post.model || model || '';
+    post.tableExpected = count;
+    post.tableMissing = missing;
 
     if (missing.length) {
-      logger.warn(`표에서 ${missing.length}개 순위를 끝내 채우지 못했습니다: ${missing.slice(0, 20).join(', ')}`);
+      logger.warn(`표에서 ${missing.length}개 행을 끝내 채우지 못했습니다: ${missing.slice(0, 20).join(', ')}`);
     } else {
       logger.info(`표 ${rows.length}개 행을 빠짐없이 채웠습니다.`);
     }
-    return post;
   }
 
-  const reply = await runClaudeJson(
-    buildStandardPrompt(topic, settings, { guidelineBlock, exampleBlock, ranking }),
-    { systemPrompt, signal: options.signal },
-  );
-  const post = normalize(reply.data, topic, settings);
-  post.model = reply.model || '';
-  post.costUsd = reply.costUsd || 0;
+  post = await repairUntilCompliant(post, {
+    topic,
+    settings,
+    systemPrompt,
+    signal: options.signal,
+    onProgress: options.onCompliance,
+  });
 
-  if (ranking.isRanking && ranking.count && post.table) {
-    post.rankingExpected = ranking.count;
-    post.rankingMissing = post.table.rows.length < ranking.count
-      ? [`${post.table.rows.length}/${ranking.count}`]
-      : [];
-  }
   return post;
 }

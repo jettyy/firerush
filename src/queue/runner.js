@@ -3,7 +3,8 @@ import path from 'node:path';
 import { STATUS, updateJob, nextPending, stats } from '../lib/store.js';
 import { getSettings } from '../lib/settings.js';
 import { generatePost, countChars } from '../content/generator.js';
-import { renderThumbnail } from '../content/thumbnail.js';
+import { summarize } from '../content/quality.js';
+import { renderThumbnail, renderContentImages } from '../content/thumbnail.js';
 import { buildPreviewHtml } from '../content/html.js';
 import { publishDraft } from '../naver/editor.js';
 import { readSessionInfo, verifySession } from '../naver/browser.js';
@@ -34,7 +35,7 @@ function broadcast() {
 }
 
 /** 결과물을 파일로도 남겨둔다. 네이버 자동화가 실패해도 글은 살아 있게. */
-function archivePost(job, post, thumbnailPath) {
+function archivePost(job, post, thumbnailPath, contentImages) {
   ensureDirs();
   const base = `${slugify(job.topic, 30)}-${job.id}`;
   const dir = path.join(OUTPUT_DIR, base);
@@ -45,6 +46,11 @@ function archivePost(job, post, thumbnailPath) {
   if (thumbnailPath && fs.existsSync(thumbnailPath)) {
     fs.copyFileSync(thumbnailPath, path.join(dir, thumbName));
   }
+  for (const image of contentImages) {
+    if (image?.filePath && fs.existsSync(image.filePath)) {
+      fs.copyFileSync(image.filePath, path.join(dir, path.basename(image.filePath)));
+    }
+  }
   fs.writeFileSync(path.join(dir, 'preview.html'), buildPreviewHtml(post, thumbName), 'utf8');
   return dir;
 }
@@ -53,6 +59,8 @@ async function processJob(job) {
   state.currentJobId = job.id;
   broadcast();
 
+  const settings = getSettings();
+
   updateJob(job.id, {
     status: STATUS.WRITING,
     message: 'AI가 글을 쓰는 중...',
@@ -60,17 +68,24 @@ async function processJob(job) {
   });
   logger.step(`[${job.topic}] 글 생성 시작`, { jobId: job.id });
 
-  const post = await generatePost(job.topic, { signal: state.abort?.signal });
+  const post = await generatePost(job.topic, {
+    signal: state.abort?.signal,
+    onCompliance: () => {
+      updateJob(job.id, { status: STATUS.CHECKING, message: '품질 검사에서 걸린 부분을 고쳐 쓰는 중...' });
+    },
+  });
+
   const charCount = countChars(post);
   const tableRows = post.table?.rows?.length || 0;
+  const compliance = post.compliance;
 
-  const notes = [`${charCount}자`];
+  const notes = [`${charCount.toLocaleString()}자`];
   if (tableRows) {
-    notes.push(post.rankingExpected
-      ? `표 ${tableRows}/${post.rankingExpected}행`
-      : `표 ${tableRows}행`);
+    notes.push(post.tableExpected ? `표 ${tableRows}/${post.tableExpected}행` : `표 ${tableRows}행`);
   }
-  if (post.rankingMissing?.length) notes.push(`누락 ${post.rankingMissing.length}건`);
+  if (post.tableMissing?.length) notes.push(`누락 ${post.tableMissing.length}건`);
+  if (post.repairs) notes.push(`보정 ${post.repairs}회`);
+  if (compliance) notes.push(summarize(compliance));
 
   updateJob(job.id, {
     title: post.title,
@@ -78,6 +93,8 @@ async function processJob(job) {
     tableRows,
     model: post.model,
     guidelineCheck: post.guidelineCheck,
+    compliance,
+    repairs: post.repairs || 0,
     message: `초안 완성 (${notes.join(', ')})`,
   });
   logger.info(
@@ -89,20 +106,41 @@ async function processJob(job) {
     logger.info(`[${job.topic}] 지침 반영: ${post.guidelineCheck}`, { jobId: job.id });
   }
 
+  // 끝내 규칙을 못 지킨 글을 올리지 않도록 막을 수 있다. 기본값은 "올리되 표시만".
+  if (compliance && !compliance.ok) {
+    const detail = compliance.issues.map((issue) => `${issue.label}(${issue.detail})`).join(' / ');
+    if (settings.quality.blockOnFail) {
+      throw new Error(`품질 검사 미통과로 저장하지 않았습니다: ${detail}`);
+    }
+    logger.warn(`[${job.topic}] 미통과 항목이 남아 있습니다: ${detail}`, { jobId: job.id });
+  }
+
   updateJob(job.id, { status: STATUS.THUMBNAIL, message: '썸네일 만드는 중...' });
   const thumb = await renderThumbnail(post, { jobId: job.id });
   updateJob(job.id, { thumbnailPath: thumb.fileName, message: `썸네일 완성 (${thumb.style})` });
 
-  const dir = archivePost(job, post, thumb.filePath);
+  let contentImages = [];
+  if (settings.thumbnail.contentCards) {
+    contentImages = await renderContentImages(post, { jobId: job.id });
+    const made = contentImages.filter(Boolean).length;
+    updateJob(job.id, { contentImages: made, message: `본문 강조 카드 ${made}/3장 완성` });
+  }
+
+  const dir = archivePost(job, post, thumb.filePath, contentImages);
 
   updateJob(job.id, { status: STATUS.POSTING, message: '네이버 에디터에 옮기는 중...' });
-  const result = await publishDraft({ post, thumbnailPath: thumb.filePath, jobId: job.id });
+  const result = await publishDraft({
+    post,
+    thumbnailPath: thumb.filePath,
+    contentImagePaths: contentImages.map((image) => image?.filePath || ''),
+    jobId: job.id,
+  });
 
   updateJob(job.id, {
     status: STATUS.DONE,
-    message: result.confirmed
-      ? '임시저장 완료'
-      : '임시저장 요청함 (저장 완료 표시 미확인)',
+    message: compliance?.ok
+      ? '임시저장 완료 (품질 검사 통과)'
+      : `임시저장 완료 (${summarize(compliance)})`,
     archiveDir: path.basename(dir),
   });
   logger.info(`[${job.topic}] 임시저장 완료`, { jobId: job.id });
@@ -169,7 +207,7 @@ async function loop() {
       }
 
       // 설정이 잘못됐거나 CLI 가 죽은 상태라면 남은 주제도 전부 같은 이유로 실패한다.
-      // 85건을 몇 초 만에 실패로 태우는 대신 멈춰서 알린다.
+      // 100건을 몇 초 만에 실패로 태우는 대신 멈춰서 알린다.
       if (consecutiveFailures >= STOP_AFTER_FAILURES) {
         logger.error(
           `연속 ${consecutiveFailures}건이 같은 이유로 실패해 실행을 멈춥니다. ` +

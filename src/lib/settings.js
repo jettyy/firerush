@@ -14,18 +14,29 @@ export const DEFAULT_SETTINGS = {
 
   // 글 설정
   post: {
-    tone: '친근한 존댓말 (~해요체)',
-    targetChars: 1200,          // 짧을수록 빠르고 토큰도 적게 든다.
-    sectionCount: 3,
-    audience: '해당 주제를 처음 접하는 일반 독자',
+    // 품질 검사(formalEnding)가 종결어미를 검사하므로, 바꾸면 검사 기준도 같이 바뀐다.
+    tone: '정중한 존댓말 (~습니다 / ~입니다)',
+    formalEnding: true,          // true: ~습니다체 검사 / false: ~해요체 검사
+    minChars: 1800,              // 공백 제외 최소 글자 수 (품질 검사 기준)
+    sectionCount: 4,             // 소제목 개수 (권장 3~4개)
+    audience: '해당 주제의 정보를 처음 찾아보는 일반 독자',
     extraGuideline: '',
+    addCriteria: true,           // 서두에 '선정 기준' 밝히기
   },
 
-  // 썸네일
+  // 글 품질 검사 — 규칙을 어기면 그 항목만 짚어 자동으로 다시 쓰게 한다.
+  quality: {
+    enforce: true,
+    maxRepairs: 1,               // 보정 재요청 횟수 (호출이 늘어나므로 1회 권장)
+    blockOnFail: false,          // 끝내 못 고치면 저장하지 않고 실패로 둘지
+  },
+
+  // 썸네일 (글 최상단) + 본문 강조 카드 (1/5·중간·4/5 지점)
   thumbnail: {
     width: 1200,
     height: 630,
     style: 'auto',               // auto | bold | gradient | minimal | editorial
+    contentCards: true,          // 본문 중간에 강조 카드 이미지 3장을 넣을지
   },
 
   // 실행

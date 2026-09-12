@@ -10,6 +10,7 @@ import { shortId, nowIso } from './util.js';
 export const STATUS = {
   PENDING: 'pending',
   WRITING: 'writing',
+  CHECKING: 'checking',
   THUMBNAIL: 'thumbnail',
   POSTING: 'posting',
   DONE: 'done',
@@ -30,7 +31,7 @@ function load() {
   }
   // 이전 실행이 중간에 끊겼다면 진행 중이던 작업은 대기로 되돌린다.
   for (const job of jobs) {
-    if ([STATUS.WRITING, STATUS.THUMBNAIL, STATUS.POSTING].includes(job.status)) {
+    if ([STATUS.WRITING, STATUS.CHECKING, STATUS.THUMBNAIL, STATUS.POSTING].includes(job.status)) {
       job.status = STATUS.PENDING;
       job.message = '이전 실행이 중단되어 대기 상태로 되돌렸습니다.';
     }
@@ -74,6 +75,9 @@ export function addTopics(topics) {
       model: '',
       guidelineCheck: '',
       tableRows: 0,
+      compliance: null,
+      repairs: 0,
+      contentImages: 0,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -126,6 +130,6 @@ export function stats() {
     done: by(STATUS.DONE),
     failed: by(STATUS.FAILED),
     running: list.filter((job) =>
-      [STATUS.WRITING, STATUS.THUMBNAIL, STATUS.POSTING].includes(job.status)).length,
+      [STATUS.WRITING, STATUS.CHECKING, STATUS.THUMBNAIL, STATUS.POSTING].includes(job.status)).length,
   };
 }

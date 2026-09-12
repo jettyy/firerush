@@ -3,7 +3,8 @@ const $ = (id) => document.getElementById(id);
 const STATUS_LABEL = {
   pending: '대기',
   writing: '글 작성 중',
-  thumbnail: '썸네일 생성',
+  checking: '품질 검사·보정 중',
+  thumbnail: '이미지 만드는 중',
   posting: '네이버 저장 중',
   done: '완료',
   failed: '실패',
@@ -131,11 +132,23 @@ function renderExamples() {
     : '<li class="empty-row">아직 올린 예시가 없습니다.</li>';
 }
 
+function complianceCell(job) {
+  const compliance = job.compliance;
+  if (!compliance) return '<span class="hint">-</span>';
+  const tooltip = compliance.results
+    .map((result) => `${result.ok ? '통과' : '미통과'} · ${result.label} — ${result.detail}`)
+    .join('\n');
+  const cls = compliance.ok ? 'pass' : 'fail';
+  return `<span class="compliance ${cls}" title="${escapeHtml(tooltip)}">`
+    + `${compliance.passed}/${compliance.total}</span>`
+    + (job.repairs ? `<span class="hint"> (보정 ${job.repairs}회)</span>` : '');
+}
+
 function renderJobs() {
   const body = $('job-body');
   const jobs = state.jobs || [];
   if (!jobs.length) {
-    body.innerHTML = '<tr><td colspan="9" class="empty">아직 추가된 주제가 없습니다.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">아직 추가된 주제가 없습니다.</td></tr>';
     return;
   }
   const current = state.runner?.currentJobId;
@@ -149,13 +162,17 @@ function renderJobs() {
       const note = job.guidelineCheck
         ? `<span class="check-note" title="${escapeHtml(job.guidelineCheck)}">지침 ✓</span>`
         : '';
+      const images = job.contentImages
+        ? `<span class="hint"> · 카드 ${job.contentImages}/3</span>`
+        : '';
       return `<tr class="${job.id === current ? 'active' : ''}">
         <td>${index + 1}</td>
         <td class="topic">${escapeHtml(job.topic)}</td>
         <td><span class="badge ${job.status}">${label}</span></td>
-        <td class="msg">${job.title ? `<b>${escapeHtml(job.title)}</b>` : ''}${escapeHtml(job.message || '')} ${note}</td>
-        <td>${job.charCount || '-'}</td>
+        <td class="msg">${job.title ? `<b>${escapeHtml(job.title)}</b>` : ''}${escapeHtml(job.message || '')} ${note}${images}</td>
+        <td>${job.charCount ? job.charCount.toLocaleString() : '-'}</td>
         <td>${job.tableRows ? `${job.tableRows}행` : '-'}</td>
+        <td class="compliance-cell">${complianceCell(job)}</td>
         <td class="model-cell">${escapeHtml(shortModel(job.model))}</td>
         <td class="thumb-cell">${thumb}</td>
         <td>
@@ -193,15 +210,21 @@ function renderSettings() {
   if (!s) return;
   $('blog-id').value = s.blogId || '';
   $('s-tone').value = s.post.tone;
-  $('s-chars').value = s.post.targetChars;
+  $('s-formal').checked = Boolean(s.post.formalEnding);
+  $('s-chars').value = s.post.minChars;
   $('s-sections').value = s.post.sectionCount;
   $('s-audience').value = s.post.audience;
+  $('s-criteria').checked = Boolean(s.post.addCriteria);
   if (document.activeElement !== $('s-guideline')) {
     $('s-guideline').value = s.post.extraGuideline || '';
   }
   $('s-thumb-style').value = s.thumbnail.style;
   $('s-thumb-w').value = s.thumbnail.width;
   $('s-thumb-h').value = s.thumbnail.height;
+  $('s-content-cards').checked = Boolean(s.thumbnail.contentCards);
+  $('s-enforce').checked = Boolean(s.quality.enforce);
+  $('s-repairs').value = s.quality.maxRepairs;
+  $('s-block').checked = Boolean(s.quality.blockOnFail);
   $('s-delay-min').value = s.run.delayMinSec;
   $('s-delay-max').value = s.run.delayMaxSec;
   $('s-retries').value = s.run.maxRetries;
@@ -281,15 +304,23 @@ function collectSettings() {
     claude: { model },
     post: {
       tone: $('s-tone').value,
-      targetChars: Number($('s-chars').value),
+      formalEnding: $('s-formal').checked,
+      minChars: Number($('s-chars').value),
       sectionCount: Number($('s-sections').value),
       audience: $('s-audience').value,
       extraGuideline: $('s-guideline').value,
+      addCriteria: $('s-criteria').checked,
     },
     thumbnail: {
       style: $('s-thumb-style').value,
       width: Number($('s-thumb-w').value),
       height: Number($('s-thumb-h').value),
+      contentCards: $('s-content-cards').checked,
+    },
+    quality: {
+      enforce: $('s-enforce').checked,
+      maxRepairs: Number($('s-repairs').value),
+      blockOnFail: $('s-block').checked,
     },
     run: {
       delayMinSec: Number($('s-delay-min').value),

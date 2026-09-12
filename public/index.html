@@ -111,9 +111,11 @@
         </label>
 
         <label>말투<input id="s-tone" type="text"></label>
-        <label>목표 분량(자)<input id="s-chars" type="number" min="500" max="2000" step="100"><span class="sub">짧을수록 빠르고 토큰이 적게 듭니다 (권장 1000~1500)</span></label>
-        <label>소제목 개수<input id="s-sections" type="number" min="2" max="6"><span class="sub">적을수록 빠릅니다 (권장 3)</span></label>
+        <label>목표 분량(공백 제외, 자)<input id="s-chars" type="number" min="500" max="4000" step="100"><span class="sub">품질 검사의 최소 분량 기준입니다 (권장 1500~2000)</span></label>
+        <label>소제목 개수<input id="s-sections" type="number" min="2" max="6"><span class="sub">권장 3~4개</span></label>
         <label>독자<input id="s-audience" type="text"></label>
+        <label class="check"><input id="s-formal" type="checkbox"> ~습니다체로 검사 (끄면 ~해요체)</label>
+        <label class="check"><input id="s-criteria" type="checkbox"> 서두에 "선정 기준" 단락 넣기</label>
 
         <label>썸네일 스타일
           <select id="s-thumb-style">
@@ -126,6 +128,11 @@
         </label>
         <label>썸네일 가로(px)<input id="s-thumb-w" type="number" min="600" max="2000" step="10"></label>
         <label>썸네일 세로(px)<input id="s-thumb-h" type="number" min="400" max="2000" step="10"></label>
+        <label class="check"><input id="s-content-cards" type="checkbox"> 본문 중간에 강조 카드 이미지 3장 넣기 (1/5·중간·4/5 지점)</label>
+
+        <label class="check"><input id="s-enforce" type="checkbox"> 품질 검사 통과할 때까지 자동으로 고쳐 쓰기</label>
+        <label>보정 재시도 횟수<input id="s-repairs" type="number" min="0" max="3"><span class="sub">늘릴수록 호출이 늘어 느려집니다 (권장 1)</span></label>
+        <label class="check"><input id="s-block" type="checkbox"> 끝내 통과 못 하면 저장하지 않고 실패 처리</label>
 
         <label>글 사이 최소 대기(초)<input id="s-delay-min" type="number" min="0" max="600"></label>
         <label>글 사이 최대 대기(초)<input id="s-delay-max" type="number" min="0" max="1200"></label>
@@ -139,6 +146,8 @@
       </div>
       <p class="note">주제를 100개 돌리기 전에 <b>연결 테스트</b>를 한 번 눌러보세요.
         모델을 쓸 수 없거나 로그인이 풀렸으면 여기서 바로 드러납니다.</p>
+      <p class="note">품질 검사는 분량·종결어미·소제목 구조·선정 기준·비교표·불렛 포인트·
+        인사말 금지·기호/이모지 금지·마무리를 자동으로 확인하고, 걸린 항목만 짚어 다시 쓰게 합니다.</p>
       <div id="ai-test-result" class="test-result hidden"></div>
       <iframe id="thumb-preview" class="thumb-preview hidden" title="썸네일 미리보기"></iframe>
     </div>
@@ -162,10 +171,10 @@
         <thead>
           <tr>
             <th>#</th><th>주제</th><th>상태</th><th>제목 / 메모</th>
-            <th>글자</th><th>표</th><th>모델</th><th>썸네일</th><th></th>
+            <th>글자</th><th>표</th><th>품질</th><th>모델</th><th>썸네일</th><th></th>
           </tr>
         </thead>
-        <tbody id="job-body"><tr><td colspan="9" class="empty">아직 추가된 주제가 없습니다.</td></tr></tbody>
+        <tbody id="job-body"><tr><td colspan="10" class="empty">아직 추가된 주제가 없습니다.</td></tr></tbody>
       </table>
     </div>
   </section>

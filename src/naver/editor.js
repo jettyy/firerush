@@ -4,7 +4,7 @@ import { getContext, hasNaverCookies } from './browser.js';
 import { getSettings } from '../lib/settings.js';
 import { SHOT_DIR, ensureDirs } from '../lib/paths.js';
 import { logger } from '../lib/events.js';
-import { buildIntroHtml, buildBodyBlocks, htmlToPlainText, BLOCK_GAP } from '../content/html.js';
+import { buildIntroHtml, buildBodyPlan, htmlToPlainText, BLOCK_GAP } from '../content/html.js';
 
 const MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -242,9 +242,10 @@ async function captureFailure(page, jobId) {
 
 /**
  * 글 한 편을 네이버 블로그 에디터에 옮겨 적고 임시저장한다.
- * 도입부 -> 썸네일 -> 본문 순서라 이미지가 글 상단 1/3 안에 들어간다.
+ * 도입부 -> 썸네일 -> 본문 순서라 이미지가 글 상단 1/3 안에 들어가고,
+ * 본문 중간(1/5·중간·4/5 지점)에는 강조 카드 이미지가 추가로 들어간다.
  */
-export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
+export async function publishDraft({ post, thumbnailPath, contentImagePaths = [], jobId = '' }) {
   const settings = getSettings();
   const blogId = settings.blogId;
   if (!blogId) throw new Error('블로그 아이디가 없습니다. 로그인하거나 설정에서 입력해 주세요.');
@@ -288,19 +289,32 @@ export async function publishDraft({ post, thumbnailPath, jobId = '' }) {
       logger.info('썸네일 삽입 완료 (도입부 직후)', { jobId });
     }
 
-    // 표가 큰 글은 한 번에 밀어 넣으면 에디터가 버거워한다. 블록 단위로 나눠 붙인다.
-    // 각 블록 앞에 빈 문단을 붙이는 게 핵심이다. 그게 없으면 블록의 첫 문단이
+    // 표가 큰 글은 한 번에 밀어 넣으면 에디터가 버거워한다. 조각 단위로 나눠 붙이고,
+    // 그 사이사이 1/5·중간·4/5 지점에 강조 카드 이미지를 끼워 넣는다.
+    // 각 텍스트 조각 앞에 빈 문단을 붙이는 게 핵심이다. 그게 없으면 조각의 첫 문단이
     // 커서가 있던 문단 뒤에 그대로 이어붙어 "구조였습니다.• • •소제목" 처럼 나온다.
-    const blocks = buildBodyBlocks(post);
+    const cardAvailable = [0, 1, 2].map((i) => Boolean(contentImagePaths[i]));
+    const plan = buildBodyPlan(post, cardAvailable);
     let lastMode = '';
-    for (let index = 0; index < blocks.length; index += 1) {
-      lastMode = await pasteHtml(page, scope, BLOCK_GAP + blocks[index]);
-      if (blocks.length > 3) {
-        logger.info(`본문 ${index + 1}/${blocks.length} 블록 입력 (${lastMode})`, { jobId });
+    let imagesInserted = 0;
+
+    for (let index = 0; index < plan.length; index += 1) {
+      const step = plan[index];
+      if (step.type === 'image') {
+        const imagePath = contentImagePaths[step.cardIndex];
+        if (!imagePath) continue;   // 안전망. cardAvailable 검사를 이미 거쳤다.
+        await insertImage(page, scope, imagePath);
+        imagesInserted += 1;
+        logger.info(`본문 강조 카드 이미지 삽입 (${imagesInserted}/3)`, { jobId });
+        continue;
+      }
+      lastMode = await pasteHtml(page, scope, BLOCK_GAP + step.html);
+      if (plan.length > 3) {
+        logger.info(`본문 텍스트 조각 입력 (${lastMode})`, { jobId });
       }
       await page.waitForTimeout(250);
     }
-    logger.info(`본문 입력 완료 (${blocks.length}개 블록, ${lastMode})`, { jobId });
+    logger.info(`본문 입력 완료 (텍스트 ${plan.filter((s) => s.type === 'html').length}조각, 이미지 ${imagesInserted}장)`, { jobId });
 
     const confirmed = await saveDraft(page, scope);
     return { saved: true, confirmed, blogId };
