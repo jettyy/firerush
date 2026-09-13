@@ -239,7 +239,6 @@ function renderSettings() {
   $('s-content-cards').checked = Boolean(s.thumbnail.contentCards);
   const image = s.image || {};
   $('s-image-on').checked = Boolean(image.enabled);
-  $('s-image-model').value = image.model || 'imagen-4.0-fast-generate-001';
   if (document.activeElement !== $('s-image-key')) $('s-image-key').value = image.apiKey || '';
   $('s-enforce').checked = Boolean(s.quality.enforce);
   $('s-repairs').value = s.quality.maxRepairs;
@@ -340,7 +339,6 @@ function collectSettings() {
     },
     image: {
       enabled: $('s-image-on').checked,
-      model: $('s-image-model').value,
       apiKey: $('s-image-key').value.trim(),
     },
     thumbnail: {

@@ -40,12 +40,98 @@ function buildPrompt(post) {
   ].join(' ');
 }
 
+/* ------------------------------------------------------------------ */
+/* 쓸 모델 고르기                                                       */
+/* ------------------------------------------------------------------ */
+
 /**
- * 구글은 이미지 모델 계열마다 호출 형식이 다르고, 한 번 갈아엎은 전례도 있다.
- * (Imagen 4 계열은 2026년 8월 17일에 종료되고 Gemini 이미지 모델로 넘어갔다)
- * 그래서 모델 이름을 설정으로 빼두고, 두 형식을 모두 지원한다.
- * 나중에 또 바뀌어도 설정에서 모델 이름만 바꾸면 된다.
+ * 구글이 이미지 모델을 통째로 갈아엎은 적이 있다.
+ * (Imagen 4 계열은 2026년 8월 17일 종료, 호출 형식까지 바뀌었다)
+ *
+ * 그래서 모델 이름을 사람이 관리하지 않는다. 계정에서 실제로 쓸 수 있는
+ * 목록을 받아와 그중 가장 싼 것을 자동으로 고른다. 이름이 또 바뀌어도
+ * 프로그램을 고칠 필요가 없다.
  */
+const MODEL_LIST_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+/** 목록을 못 받아왔을 때 마지막으로 기대볼 이름. */
+const FALLBACK_MODEL = 'gemini-3.1-flash-image';
+
+/** 이미 종료된 모델. 설정에 남아 있어도 무시하고 다시 고른다. */
+const RETIRED = /^imagen-4\.0-/i;
+
+/** 계정에서 고른 모델을 프로세스가 사는 동안 재사용한다. 글마다 목록을 받을 이유가 없다. */
+let resolved = { key: '', model: '' };
+
+/**
+ * 이미지 "생성" 모델인지 보고, 싼 순서를 매긴다.
+ * 점수가 낮을수록 먼저 고른다. 후보가 아니면 null.
+ */
+function rankModel(id) {
+  if (!/image/i.test(id)) return null;        // 이미지 생성 모델이 아니다
+  if (/ultra/i.test(id)) return null;         // 가장 비싼 등급은 쓰지 않는다
+  return {
+    // flash 가 가장 싼 등급이다. pro 는 가장 뒤로 민다.
+    tier: /flash/i.test(id) ? 0 : (/pro/i.test(id) ? 2 : 1),
+    preview: /preview|exp\b/i.test(id) ? 1 : 0,
+    // 같은 등급이면 최신 버전이 품질 대비 유리하다.
+    version: Number.parseFloat((id.match(/(\d+(?:\.\d+)?)/) || [])[1] || '0'),
+  };
+}
+
+/** 계정에서 쓸 수 있는 이미지 모델 중 가장 싼 것을 고른다. */
+async function pickCheapestModel(apiKey) {
+  const response = await fetch(MODEL_LIST_URL, {
+    method: 'GET',
+    headers: { 'x-goog-api-key': apiKey },
+  });
+  if (!response.ok) {
+    throw new Error(errorReason(response.status, await response.text()));
+  }
+
+  const candidates = [];
+  for (const entry of (await response.json())?.models || []) {
+    const id = String(entry?.name || '').replace(/^models\//, '');
+    const methods = entry?.supportedGenerationMethods || [];
+    // 이미지를 만들어 주는 호출을 지원해야 한다.
+    if (!methods.includes('generateContent') && !methods.includes('predict')) continue;
+    const rank = rankModel(id);
+    if (rank) candidates.push({ id, ...rank });
+  }
+
+  if (!candidates.length) throw new Error('계정에서 쓸 수 있는 이미지 생성 모델을 찾지 못했습니다.');
+  candidates.sort((a, b) => (
+    a.tier - b.tier || a.preview - b.preview || b.version - a.version
+  ));
+  return candidates[0].id;
+}
+
+/**
+ * 이번 호출에 쓸 모델 이름.
+ * 설정에 직접 적어둔 이름이 있으면 그것을 쓰고(종료된 모델은 무시),
+ * 없으면 계정 목록에서 자동으로 고른다.
+ */
+async function resolveModel(image, { jobId = '' } = {}) {
+  const pinned = String(image.model || '').trim();
+  if (pinned && !RETIRED.test(pinned)) return pinned;
+
+  if (resolved.key === image.apiKey && resolved.model) return resolved.model;
+
+  try {
+    const picked = await pickCheapestModel(image.apiKey);
+    resolved = { key: image.apiKey, model: picked };
+    logger.info(`이미지 모델을 자동으로 골랐습니다: ${picked}`, { jobId });
+    return picked;
+  } catch (error) {
+    logger.warn(
+      `이미지 모델 목록을 받지 못해 ${FALLBACK_MODEL} 로 시도합니다. (${error.message})`,
+      { jobId },
+    );
+    return FALLBACK_MODEL;
+  }
+}
+
+/** Imagen 계열은 :predict, Gemini 계열은 :generateContent 로 형식이 다르다. */
 function isImagen(model) {
   return /^imagen/i.test(model);
 }
@@ -104,8 +190,7 @@ function errorReason(status, text) {
     // JSON 이 아니면 앞부분을 그대로 쓴다.
   }
   const hint = status === 404
-    ? ' — 이 모델이 없어졌거나 이름이 바뀐 것 같습니다. 설정의 "이미지 모델"을 '
-      + '현재 쓸 수 있는 이름으로 바꿔주세요. (구글 AI Studio 의 모델 목록에서 확인)'
+    ? ' — 고른 모델이 없어진 것 같습니다. 다음 글에서 목록을 다시 받아 새로 고릅니다.'
     : '';
   return `${status} ${detail}${hint}`;
 }
@@ -126,7 +211,7 @@ export async function generateBackground(post, { jobId = '', signal } = {}) {
     return null;
   }
 
-  const model = image.model || 'gemini-3.1-flash-image';
+  const model = await resolveModel(image, { jobId });
   const { url, body } = buildRequest(model, buildPrompt(post));
 
   const controller = new AbortController();
@@ -146,6 +231,8 @@ export async function generateBackground(post, { jobId = '', signal } = {}) {
     });
 
     if (!response.ok) {
+      // 고른 모델이 없어졌다면 캐시를 비워 다음 글에서 목록부터 다시 받게 한다.
+      if (response.status === 404) resolved = { key: '', model: '' };
       logger.warn(
         `썸네일 배경 생성 실패 (${errorReason(response.status, await response.text())}). `
         + '기존 방식으로 만듭니다.',
@@ -178,7 +265,9 @@ export async function testImageApi() {
   const image = settings.image || {};
   if (!image.apiKey) return { ok: false, message: 'API 키를 먼저 입력하고 저장하세요.' };
 
-  const model = image.model || 'gemini-3.1-flash-image';
+  // 테스트할 때는 캐시를 비우고 목록부터 다시 받는다. 무엇이 고를지 눈으로 확인하는 버튼이다.
+  resolved = { key: '', model: '' };
+  const model = await resolveModel(image);
   const { url, body } = buildRequest(model, 'A simple flat vector illustration of a blue circle on a light background. No text.');
 
   try {
@@ -194,7 +283,8 @@ export async function testImageApi() {
     if (!base64) return { ok: false, message: '응답은 왔지만 그림이 들어 있지 않습니다. 모델 이름을 확인하세요.' };
     return {
       ok: true,
-      message: `성공 — ${model} 로 그림을 받았습니다 (${Math.round(base64.length * 0.75 / 1024)}KB).`,
+      message: `성공 — 가장 저렴한 모델로 ${model} 을 골랐고, 그림을 받았습니다 `
+        + `(${Math.round(base64.length * 0.75 / 1024)}KB).`,
       preview: `data:image/png;base64,${base64}`,
     };
   } catch (error) {

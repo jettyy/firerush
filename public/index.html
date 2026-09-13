@@ -154,15 +154,6 @@
         <label class="check"><input id="s-content-cards" type="checkbox"> 본문 중간에 강조 카드 이미지 3장 넣기 (1/5·중간·4/5 지점)</label>
 
         <label class="wide check"><input id="s-image-on" type="checkbox"> 상단 썸네일 배경을 이미지 생성 AI로 그리기 (글 1편당 1장, 유료)</label>
-        <label>이미지 모델
-          <input id="s-image-model" type="text" list="image-model-list" placeholder="gemini-3.1-flash-image">
-          <datalist id="image-model-list">
-            <option value="gemini-3.1-flash-image">
-            <option value="gemini-3-pro-image">
-          </datalist>
-          <span class="sub">구글이 모델을 자주 바꿉니다. 404가 나면 여기 이름만 바꾸세요.
-            (구 imagen-4.0-* 계열은 2026-08-17 종료)</span>
-        </label>
         <label>구글 API 키
           <input id="s-image-key" type="password" placeholder="aistudio.google.com 에서 발급" autocomplete="off">
           <span class="sub">이 컴퓨터의 data/settings.json 에만 저장됩니다</span>
@@ -186,8 +177,9 @@
       <p class="note">이미지 생성은 <b>상단 썸네일의 배경 그림 한 장</b>에만 씁니다.
         한글 문구는 프로그램이 그 위에 얹으므로 글자가 깨지지 않고,
         본문 강조 카드 3장은 지금처럼 공짜로 만듭니다.
-        키를 저장한 뒤 <b>이미지 API 테스트</b>를 눌러 한 장 뽑아보세요.
-        글 100편에 대략 7천원선이고, 모델 이름과 가격은 구글이 자주 바꿉니다.</p>
+        모델은 <b>계정에서 쓸 수 있는 것 중 가장 싼 것을 자동으로</b> 고르므로 따로 정할 필요가 없습니다.
+        구글이 모델을 바꿔도 알아서 따라갑니다.
+        키를 저장한 뒤 <b>이미지 API 테스트</b>를 눌러 어떤 모델이 골라졌는지 확인하세요.</p>
       <img id="image-test-preview" class="hidden" alt="이미지 테스트 결과"
            style="width:100%; max-width:420px; margin-top:12px; border-radius:10px; border:1px solid var(--line);">
       <p class="note">주제를 100개 돌리기 전에 <b>연결 테스트</b>를 한 번 눌러보세요.
