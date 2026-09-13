@@ -247,6 +247,7 @@ function renderSettings() {
   $('s-delay-min').value = s.run.delayMinSec;
   $('s-delay-max').value = s.run.delayMaxSec;
   $('s-retries').value = s.run.maxRetries;
+  $('s-stop-fail').value = s.run.stopAfterFailures ?? 10;
   $('s-headless').checked = Boolean(s.run.headless);
   renderModels();
   renderModelPill();
@@ -358,6 +359,7 @@ function collectSettings() {
       delayMinSec: Number($('s-delay-min').value),
       delayMaxSec: Number($('s-delay-max').value),
       maxRetries: Number($('s-retries').value),
+      stopAfterFailures: Number($('s-stop-fail').value),
       headless: $('s-headless').checked,
     },
   };

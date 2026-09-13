@@ -93,6 +93,9 @@ export const DEFAULT_SETTINGS = {
     delayMinSec: 30,
     delayMaxSec: 90,
     maxRetries: 1,
+    // 연속으로 이만큼 실패하면 멈춘다. 0 이면 무슨 일이 있어도 끝까지 돌린다.
+    // AI 가 주제를 거절한 건은 여기 세지 않고 그냥 건너뛴다.
+    stopAfterFailures: 10,
     headless: false,             // 네이버는 실제 창을 띄우는 편이 안전하다.
     slowMoMs: 20,
     screenshotOnError: true,

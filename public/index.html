@@ -173,6 +173,7 @@
         <label>글 사이 최소 대기(초)<input id="s-delay-min" type="number" min="0" max="600"></label>
         <label>글 사이 최대 대기(초)<input id="s-delay-max" type="number" min="0" max="1200"></label>
         <label>실패 시 재시도 횟수<input id="s-retries" type="number" min="0" max="5"></label>
+        <label>연속 실패 시 멈춤<input id="s-stop-fail" type="number" min="0" max="100"><span class="sub">연속으로 이만큼 실패하면 멈춥니다. <b>0 이면 끝까지 돌립니다.</b> AI가 주제를 거절한 건은 세지 않고 그냥 건너뜁니다.</span></label>
         <label class="check"><input id="s-headless" type="checkbox"> 브라우저 창 숨기기(헤드리스)</label>
       </div>
       <div class="row">

@@ -146,8 +146,16 @@ async function processJob(job) {
   logger.info(`[${job.topic}] 임시저장 완료`, { jobId: job.id });
 }
 
-// 같은 이유로 계속 실패할 때 남은 주제를 전부 태우지 않도록 하는 한계선.
-const STOP_AFTER_FAILURES = 3;
+/**
+ * 연속으로 이만큼 실패하면 실행을 멈춘다. 설정(run.stopAfterFailures)으로 바꾼다.
+ *
+ * 설정이 잘못됐거나 CLI 가 죽었으면 남은 주제도 전부 같은 이유로 실패한다.
+ * 100건을 몇 초 만에 태우는 대신 멈춰서 알리려는 안전장치다.
+ * 0 으로 두면 무슨 일이 있어도 끝까지 돌린다.
+ *
+ * AI 가 주제를 거절한 경우는 여기 세지 않는다. 그건 주제 하나의 문제다.
+ */
+const DEFAULT_STOP_AFTER_FAILURES = 10;
 
 async function loop() {
   let processed = 0;
@@ -195,6 +203,16 @@ async function loop() {
         continue;
       }
 
+      // AI가 이 주제로는 못 쓰겠다고 거절한 경우.
+      // 다시 물어도 또 거절하므로 재시도는 낭비다. 건너뛰고 다음 주제로 간다.
+      // 주제 하나의 문제이지 설정이나 CLI 문제가 아니므로 연속 실패로도 세지 않는다.
+      if (error.refusal) {
+        updateJob(job.id, { status: STATUS.SKIPPED, message: `AI가 거절해 건너뜀: ${message}` });
+        logger.warn(`[${job.topic}] AI가 거절해 건너뜁니다. ${message}`, { jobId: job.id });
+        consecutiveFailures = 0;
+        continue;
+      }
+
       consecutiveFailures += 1;
       const canRetry = job.attempts <= getSettings().run.maxRetries;
       if (canRetry && state.running) {
@@ -206,12 +224,11 @@ async function loop() {
         logger.error(`[${job.topic}] 실패: ${message}`, { jobId: job.id });
       }
 
-      // 설정이 잘못됐거나 CLI 가 죽은 상태라면 남은 주제도 전부 같은 이유로 실패한다.
-      // 100건을 몇 초 만에 실패로 태우는 대신 멈춰서 알린다.
-      if (consecutiveFailures >= STOP_AFTER_FAILURES) {
+      const limit = Number(getSettings().run.stopAfterFailures ?? DEFAULT_STOP_AFTER_FAILURES);
+      if (limit > 0 && consecutiveFailures >= limit) {
         logger.error(
-          `연속 ${consecutiveFailures}건이 같은 이유로 실패해 실행을 멈춥니다. ` +
-          `마지막 오류: ${message}`,
+          `연속 ${consecutiveFailures}건이 같은 이유로 실패해 실행을 멈춥니다. `
+          + `계속 돌리려면 설정의 "연속 실패 시 멈춤"을 0으로 두세요. 마지막 오류: ${message}`,
         );
         state.running = false;
       }
