@@ -153,7 +153,20 @@
         <label>썸네일 세로(px)<input id="s-thumb-h" type="number" min="400" max="2000" step="10"></label>
         <label class="check"><input id="s-content-cards" type="checkbox"> 본문 중간에 강조 카드 이미지 3장 넣기 (1/5·중간·4/5 지점)</label>
 
-        <label class="wide check"><input id="s-image-on" type="checkbox"> 상단 썸네일 배경을 이미지 생성 AI로 그리기 (글 1편당 1장, 유료)</label>
+        <label class="wide check"><input id="s-image-on" type="checkbox"> 상단 썸네일을 이미지 생성 AI로 만들기 (글 1편당 1장, 유료)</label>
+        <label>썸네일 만드는 방식
+          <select id="s-image-mode">
+            <option value="full">AI가 한글까지 통째로 그리기 (화려함)</option>
+            <option value="background">배경만 AI, 한글은 프로그램이 (안 깨짐)</option>
+          </select>
+          <span class="sub">한글이 뭉개져 나오면 아래 "품질 우선"으로 바꾸거나 이걸 "배경만"으로 내리세요.</span>
+        </label>
+        <label>이미지 모델 고르는 기준
+          <select id="s-image-prefer">
+            <option value="cheap">싼 것 우선 (flash 등급)</option>
+            <option value="quality">품질 우선 (pro 등급 · 한글이 덜 깨짐, 더 비쌈)</option>
+          </select>
+        </label>
         <label>구글 API 키
           <input id="s-image-key" type="password" placeholder="aistudio.google.com 에서 발급" autocomplete="off">
           <span class="sub">이 컴퓨터의 data/settings.json 에만 저장됩니다</span>
@@ -177,9 +190,10 @@
       <p class="note">이미지 생성은 <b>상단 썸네일의 배경 그림 한 장</b>에만 씁니다.
         한글 문구는 프로그램이 그 위에 얹으므로 글자가 깨지지 않고,
         본문 강조 카드 3장은 지금처럼 공짜로 만듭니다.
-        모델은 <b>계정에서 쓸 수 있는 것 중 가장 싼 것을 자동으로</b> 고르므로 따로 정할 필요가 없습니다.
-        구글이 모델을 바꿔도 알아서 따라갑니다.
-        키를 저장한 뒤 <b>이미지 API 테스트</b>를 눌러 어떤 모델이 골라졌는지 확인하세요.</p>
+        기본값은 <b>AI가 한글 문구까지 통째로 그리는</b> 방식입니다. 광고 배너처럼 화려하게 나오지만
+        드물게 한글이 뭉개질 수 있는데, 그럴 때는 위에서 방식이나 모델 기준을 바꾸면 됩니다.
+        모델 이름은 계정에서 쓸 수 있는 것 중에서 자동으로 고르므로 정할 필요가 없습니다.
+        키를 저장한 뒤 <b>이미지 API 테스트</b>를 눌러 결과를 눈으로 확인하세요.</p>
       <img id="image-test-preview" class="hidden" alt="이미지 테스트 결과"
            style="width:100%; max-width:420px; margin-top:12px; border-radius:10px; border:1px solid var(--line);">
       <p class="note">주제를 100개 돌리기 전에 <b>연결 테스트</b>를 한 번 눌러보세요.

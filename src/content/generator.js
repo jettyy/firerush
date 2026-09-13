@@ -83,9 +83,12 @@ const THUMBNAIL_BLOCK = `[썸네일 문구]
 - style: bold, gradient, minimal, editorial 중 하나
 - accent: 어두운 계열 HEX (흰 글씨가 올라갑니다)
 - 썸네일 문구에도 특수문자와 이모지를 쓰지 마세요.
-- scene: 썸네일 배경에 그릴 그림을 영어 한 줄로 묘사하세요. 글자는 그리지 않습니다.
-  주제를 한눈에 알아볼 수 있는 사물이나 장면으로 쓰세요.
-  (예: "a city skyline with university buildings and students holding books")`;
+- headline 은 썸네일에 가장 크게 박히는 문구입니다. 클릭하고 싶어지게 쓰세요.
+  ("2026 대학 순위" 보다 "4년제만 답이 아니다" 처럼 한 번 더 눈길이 가는 말)
+- scene: 썸네일에 그릴 그림을 영어 한 줄로 묘사하세요. 문구 말고 그림만 묘사합니다.
+  주제를 한눈에 알아볼 수 있는 인물, 사물, 장면을 구체적으로 적으세요.
+  (예: "a smiling Korean graduate in cap and gown giving a thumbs up, with icons for
+  nursing, semiconductor, automotive and aviation, and a bright factory lab in the background")`;
 
 function metaBlock() {
   return `[태그]

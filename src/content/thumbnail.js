@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { renderTemplate, renderContentCard } from './templates/index.js';
 import { buildHighlightCards } from './highlights.js';
-import { generateBackground } from './imagegen.js';
+import { generateThumbnailImage } from './imagegen.js';
 import { getRenderBrowser } from '../lib/playwright.js';
 import { getSettings } from '../lib/settings.js';
 import { THUMB_DIR, ensureDirs } from '../lib/paths.js';
@@ -49,26 +49,38 @@ async function renderHtmlToPng(html, { width, height, filePath }) {
 }
 
 /**
- * AI 가 설계한 문구/색상을 HTML 템플릿에 얹고 스크린샷으로 PNG를 만든다.
- * 이미지 생성 API를 쓰지 않으므로 추가 비용이 없다.
+ * 상단 썸네일 한 장을 만든다.
+ *
+ * 이미지 생성이 켜져 있으면 AI가 그린 것을 쓰고(글자까지 그렸으면 그대로 저장),
+ * 꺼져 있거나 실패하면 HTML 템플릿을 스크린샷 찍는 기존 방식으로 넘어간다.
  */
 export async function renderThumbnail(post, { jobId = '', signal } = {}) {
   ensureDirs();
   const settings = getSettings();
   const { width, height } = settings.thumbnail;
 
-  // 배경 그림만 이미지 API로 받아온다. 실패하면 null 이 와서 기존 방식으로 만든다.
-  const background = await generateBackground(post, { jobId, signal });
-  const spec = { ...post.thumbnail, width, height, background };
-  const html = renderTemplate(spec);
+  // 이미지 API 를 먼저 시도한다. 실패하면 null 이 와서 기존 HTML 방식으로 넘어간다.
+  const generated = await generateThumbnailImage(post, { jobId, signal });
 
   const fileName = `${Date.now()}-${jobId || slugify(post.title, 24)}.png`;
   const filePath = path.join(THUMB_DIR, fileName);
+
+  // 글자까지 그려서 받았으면 손대지 않고 그대로 쓴다.
+  // 다시 그리면 그림이 눌리거나 화질만 깎인다.
+  if (generated?.mode === 'full') {
+    fs.writeFileSync(filePath, Buffer.from(generated.base64, 'base64'));
+    const size = fs.statSync(filePath).size;
+    logger.info(`썸네일 생성 완료 (AI가 통째로 그림, ${Math.round(size / 1024)}KB)`, { jobId });
+    return { filePath, fileName, style: 'ai' };
+  }
+
+  const spec = { ...post.thumbnail, width, height, background: generated?.dataUri || null };
+  const html = renderTemplate(spec);
   const size = await renderHtmlToPng(html, { width, height, filePath });
 
-  const how = background ? '배경 그림 + 한글 얹기' : spec.style;
+  const how = spec.background ? '배경 그림 + 한글 얹기' : spec.style;
   logger.info(`썸네일 생성 완료 (${how}, ${Math.round(size / 1024)}KB)`, { jobId });
-  return { filePath, fileName, style: background ? 'illust' : spec.style };
+  return { filePath, fileName, style: spec.background ? 'illust' : spec.style };
 }
 
 /**

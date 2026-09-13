@@ -66,6 +66,14 @@ export const DEFAULT_SETTINGS = {
   image: {
     enabled: false,              // API 키를 넣고 켜야 동작한다. 꺼져 있으면 지금까지와 똑같다.
     provider: 'google',
+    /**
+     * full       — 한글 문구까지 AI가 그려 완성된 썸네일을 그대로 쓴다. 화려하다.
+     * background — 글자 없는 배경만 AI가 그리고 한글은 프로그램이 얹는다. 안 깨진다.
+     * 한글이 뭉개져 나오면 background 로 내리거나 prefer 를 quality 로 바꾼다.
+     */
+    mode: 'full',
+    // cheap — flash 등급(쌈) / quality — pro 등급(글자를 정확하게 그림)
+    prefer: 'cheap',
     // 비워두면 계정에서 쓸 수 있는 이미지 모델 목록을 받아 가장 싼 것을 자동으로 고른다.
     // 구글이 Imagen 4 계열을 2026-08-17 에 통째로 종료한 전례가 있어서,
     // 이름을 붙박이로 두지 않는다. 특정 모델을 고집하고 싶을 때만 여기에 적는다.
