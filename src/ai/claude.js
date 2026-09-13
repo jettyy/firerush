@@ -112,19 +112,32 @@ function pickModel(envelope) {
  *
  * @returns {Promise<{text: string, model: string, costUsd: number, durationMs: number}>}
  */
-export function runClaude(prompt, { systemPrompt = '', timeoutMs, signal, model } = {}) {
+export function runClaude(prompt, {
+  systemPrompt = '', timeoutMs, signal, model, webSearch = false,
+} = {}) {
   const settings = getSettings();
   const command = settings.claude.command || 'claude';
-  const limit = timeoutMs || settings.claude.timeoutMs || 300000;
   const wanted = model ?? settings.claude.model;
+  const searching = webSearch && settings.claude.webSearch !== false;
+  // 검색을 하면 왕복이 여러 번이라 한 번에 끝나지 않는다. 시간을 넉넉히 준다.
+  const limit = timeoutMs
+    || (searching ? settings.claude.searchTimeoutMs : settings.claude.timeoutMs)
+    || 300000;
 
   const args = [
     '-p',
     '--output-format', 'json',
-    '--restricted',            // 글쓰기에는 Bash/코드 실행 도구가 필요 없다.
     '--no-session-persistence',
     '--strict-mcp-config',
   ];
+
+  if (searching) {
+    // 검색만 열어준다. --tools 로 목록을 좁히면 Bash 같은 실행 도구는 그대로 막힌다.
+    // -p 모드에서는 승인 창을 띄울 수 없으므로 이 도구만 미리 허용해 둔다.
+    args.push('--tools', 'WebSearch', '--allowedTools', 'WebSearch', '--permission-mode', 'dontAsk');
+  } else {
+    args.push('--restricted');   // 글쓰기에는 Bash/코드 실행 도구가 필요 없다.
+  }
   if (wanted) args.push('--model', wanted);
 
   const fullPrompt = systemPrompt

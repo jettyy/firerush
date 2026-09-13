@@ -26,6 +26,7 @@ export function sentenceSources(post) {
   const pushAll = (list) => (list || []).forEach((text) => out.push(String(text)));
 
   pushAll(post.intro);
+  pushAll(post.disclaimer);
   if (post.criteria) {
     pushAll(post.criteria.paragraphs);
     pushAll(post.criteria.items);
@@ -41,6 +42,8 @@ export function sentenceSources(post) {
   }
   for (const item of post.faq || []) out.push(item.answer);
   pushAll(post.outro);
+  // footnote 는 분량·금지표현 검사 대상이지만, 정형화된 안내문이라
+  // 말투(구어체 비율) 검사에는 넣지 않는다. 여기서는 제외하고 allText 에서만 센다.
   return out.filter((text) => text.trim());
 }
 
@@ -54,10 +57,12 @@ export function allText(post) {
     for (const sub of section.subsections || []) out.push(sub.heading || '');
   }
   for (const item of post.faq || []) out.push(item.question || '');
-  if (post.table) {
-    out.push(post.table.heading || '', post.table.note || '');
-    for (const row of post.table.rows || []) out.push(...row);
+  for (const table of [post.table, post.checklist]) {
+    if (!table) continue;
+    out.push(table.heading || '', table.note || '');
+    for (const row of table.rows || []) out.push(...row);
   }
+  if (post.footnote) out.push(post.footnote);
   return out.join('\n');
 }
 
@@ -93,6 +98,13 @@ const EMOJI = /\p{Extended_Pictographic}/u;
 // 서론 맨 앞에 오면 안 되는 인사말·메타 안내 문장.
 const GREETING = /^(안녕하세요|반갑습니다|여러분|오늘은|이번\s*(포스팅|글|시간)|금일|본\s*포스팅|이\s*글에서는|지난\s*시간에)/;
 const META_SENTENCE = /(알아보(겠습니다|도록 하겠습니다)|살펴보(겠습니다|도록 하겠습니다)|정리해\s*보(겠습니다|았습니다)|준비했습니다)\s*[.!]?\s*$/;
+
+/**
+ * 소제목이 "문장"인지 보는 패턴.
+ * 명사 뒤에 붙는 "요"(개요, 중요)와 서술어 "요"(비쌌네요)를 가르기 위해
+ * 바로 앞 글자까지 묶어서 본다.
+ */
+const HEADING_SENTENCE = /(네요|더라고요|더군요|거든요|잖아요|습니다|입니다|았어요|었어요|해요|하죠|군요|는데|까요|을까|좋다|낫다)\s*[.?!]?$/;
 
 // "~함 / ~임 / ~됨" 개조식(메모식). 어느 말투에서도 금지한다.
 const MEMO_TAIL = /([가-힣]{2,12})(함|됨|임)\s*[.!]?$/;
@@ -353,6 +365,84 @@ export const RULES = [
         detail: rows >= 2 && cols >= 2
           ? `표 ${rows}행 × ${cols}열`
           : '비교 표가 없습니다. table.headers 와 table.rows 를 2행 이상 채우세요.',
+      };
+    },
+  },
+  {
+    id: 'caution',
+    label: '신뢰도 장치',
+    prompt: () => '본론 전에 이 주제에서 사람들이 오해하는 것을 짚고(disclaimer), '
+      + '글 끝에 이 자료의 성격과 확인이 필요한 부분을 밝힐 것(footnote).',
+    check: (post) => {
+      const problems = [];
+      const opening = (post.disclaimer || []).join('').replace(/\s+/g, '').length;
+      if (opening < 60) {
+        problems.push('disclaimer 가 비었거나 짧습니다 — 본론 전에 짚고 갈 전제나 오해를 2문단 쓰세요');
+      }
+      if (String(post.footnote || '').replace(/\s+/g, '').length < 40) {
+        problems.push('footnote 가 비었습니다 — 글 끝에 이 자료의 성격과 확인이 필요한 부분을 한 문단 쓰세요');
+      }
+      return {
+        ok: problems.length === 0,
+        detail: problems.length ? problems.join(' / ') : '서두 단서와 하단 참고를 모두 밝혔습니다',
+      };
+    },
+  },
+  {
+    id: 'checklist',
+    label: '체크리스트 표',
+    prompt: () => '마무리 직전에 "이것까지 같이 보세요" 2열 표를 하나 더 넣을 것. '
+      + '왼쪽은 확인할 항목, 오른쪽은 내가 그걸 왜 중요하게 봤는지.',
+    check: (post) => {
+      const rows = post.checklist?.rows?.length || 0;
+      return {
+        ok: rows >= 4,
+        detail: rows >= 4
+          ? `체크리스트 ${rows}줄`
+          : `체크리스트 표가 ${rows}줄뿐입니다. checklist.rows 를 5~6줄로 채우세요.`,
+      };
+    },
+  },
+  {
+    id: 'headingStyle',
+    label: '소제목 말투',
+    prompt: () => '소제목을 명사 나열로 쓰지 말 것. '
+      + '"가습기 종류" 가 아니라 "가습기 고르면서 겪은 시행착오" 처럼 그 대목에서 하는 이야기를 문장으로 적으세요.',
+    // 항목형 글의 소제목은 "1위. OOO" 처럼 항목 이름 그 자체라 문장일 수 없다.
+    enabledWhen: (settings, post) => post?.shape !== 'items',
+    check: (post) => {
+      const headings = (post.sections || []).map((s) => s.heading).filter(Boolean);
+      if (!headings.length) return { ok: false, detail: '소제목이 없습니다.' };
+
+      const flat = headings.filter((raw) => {
+        const text = raw.trim();
+        // "1. 개요" 류의 번호 목차. 다만 순위 글의 "1위. OOO" 는 정상이다.
+        if (post.shape !== 'items' && /^\d+\s*[.)]/.test(text)) return true;
+        // 짧으면서 서술어로 끝나지 않으면 대개 "개요", "가습기 종류" 같은 명사 나열이다.
+        return text.replace(/\s+/g, '').length < 10 && !HEADING_SENTENCE.test(text);
+      });
+      return {
+        ok: flat.length === 0,
+        detail: flat.length === 0
+          ? `소제목 ${headings.length}개가 모두 문장입니다`
+          : `명사 나열로 보이는 소제목: ${flat.slice(0, 3).map((t) => `"${t}"`).join(', ')}`
+            + ' — 그 대목에서 하는 이야기를 문장으로 풀어 쓰세요.',
+      };
+    },
+  },
+  {
+    id: 'teaser',
+    label: '다음 글 예고',
+    prompt: () => '마무리 마지막 문단에 이어서 쓸 다음 글을 한 문장으로 예고할 것. '
+      + '("내일은 범위를 좁혀서 따로 나눠보려고 합니다" 같은 문장)',
+    check: (post) => {
+      const outro = (post.outro || []).join(' ');
+      const found = /(내일|다음\s*(글|번|편|포스팅)|이어서|따로\s*(나눠|정리)|또\s*정리|써\s*보려|정리해\s*보려|올려\s*보려)/.test(outro);
+      return {
+        ok: found,
+        detail: found
+          ? '다음 글을 예고하며 끝냈습니다'
+          : '마무리에 다음 글 예고가 없습니다. 이어서 쓸 글을 한 문장으로 덧붙이세요.',
       };
     },
   },

@@ -59,6 +59,30 @@ function list(items) {
 
 const divider = () => `<p style="text-align:center; margin:26px 0; color:#c0c6cc;">• • •</p>`;
 
+/** 글 맨 끝의 ※ 참고 문단. 본문보다 작고 흐리게 둔다. */
+function footnote(text) {
+  return (
+    `<p style="margin:26px 0 8px 0; padding:12px 14px; background:#f7f8f9; ` +
+    `border-radius:6px; line-height:1.75; font-size:14px; color:#5b6773; ` +
+    `text-align:left;">※ 참고: ${inline(text)}</p>`
+  );
+}
+
+/** 검색해서 참고한 자료 목록. */
+function sourcesHtml(sources) {
+  const items = sources
+    .map((source) => (
+      `<li style="margin:0 0 5px 0; line-height:1.7; font-size:13.5px; ` +
+      `color:#5b6773; text-align:left;">${inline(source)}</li>`
+    ))
+    .join('');
+  return (
+    `<p style="margin:16px 0 6px 0; font-size:14px; font-weight:700; color:#5b6773; ` +
+    `text-align:left;">참고한 자료</p>` +
+    `<ul style="margin:0 0 18px 0; padding-left:20px; color:#5b6773;">${items}</ul>`
+  );
+}
+
 /** 순위표 등. 네이버 에디터는 붙여넣은 <table> 을 표 컴포넌트로 바꿔준다. */
 export function buildTableHtml(table) {
   if (!table?.headers?.length || !table.rows?.length) return '';
@@ -151,6 +175,10 @@ function bodyPieces(post) {
   const pieces = [];
   const tableHtml = buildTableHtml(post.table);
 
+  // 본론에 들어가기 전에 짚고 갈 전제. 글의 신뢰도를 만드는 자리라 앞에 둔다.
+  if (post.disclaimer?.length) {
+    pieces.push(post.disclaimer.map(paragraph).join(SPACER));
+  }
   if (post.criteria) pieces.push(criteriaHtml(post.criteria));
 
   post.sections.forEach((section, index) => {
@@ -161,10 +189,20 @@ function bodyPieces(post) {
   });
   if (tableHtml && !post.sections.length) pieces.push(tableHtml);
 
+  // "이것까지 같이 보세요" 표는 마무리 직전이 제자리다.
+  const checklistHtml = buildTableHtml(post.checklist);
+  if (checklistHtml) {
+    pieces.push(divider());
+    if (post.checklist.heading) pieces.push(heading(post.checklist.heading));
+    pieces.push(checklistHtml);
+  }
+
   if (post.outro.length) {
     pieces.push(divider());
     pieces.push(post.outro.map(paragraph).join(SPACER));
   }
+  if (post.footnote) pieces.push(footnote(post.footnote));
+  if (post.sources?.length) pieces.push(sourcesHtml(post.sources));
   if (post.tags.length) {
     pieces.push(paragraph(post.tags.map((tag) => `#${tag}`).join(' ')));
   }

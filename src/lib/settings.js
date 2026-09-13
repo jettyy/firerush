@@ -10,6 +10,10 @@ export const DEFAULT_SETTINGS = {
     command: 'claude',
     model: '',                   // 비우면 CLI 기본 모델
     timeoutMs: 300000,
+    // 본문을 쓸 때 웹 검색을 허용할지. 켜면 실제 수치와 출처를 인용할 수 있지만
+    // 글 하나에 1~3분이 더 걸리고 구독 사용량을 더 쓴다.
+    webSearch: true,
+    searchTimeoutMs: 600000,
   },
 
   // 글을 쓰는 '사람'. 여기 적은 내용이 프롬프트 맨 앞에 들어가고,

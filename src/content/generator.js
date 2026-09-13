@@ -131,11 +131,15 @@ function jsonShape({ withItems, withCriteria, withTableRows }) {
   "tags": ["태그1","태그2","태그3","태그4","태그5","태그6","태그7","태그8"],
   "guidelineCheck": "사용자 지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
   "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"minimal","accent":"#1F3A93"},
-  "intro": ["도입 문단1", "도입 문단2", "도입 문단3"],${criteria}${table}
+  "intro": ["도입 문단1", "도입 문단2", "도입 문단3"],
+  "disclaimer": ["본론 전에 짚고 갈 오해나 전제를 적는 문단입니다.", "왜 그런지 설명하는 문단입니다."],${criteria}${table}
   "sections": [
     ${section}
   ],
-  "outro": ["지금 어떻게 쓰고 있는지 덤덤하게 적는 문단입니다.", "내일 할 일이나 다짐으로 끝내는 문단입니다."]
+  "checklist": {"heading":"이것까지 같이 보세요","headers":["확인할 항목","제가 중요하다고 본 이유"],"rows":[["항목 이름","왜 중요한지 한 줄"]]},
+  "outro": ["지금 어떻게 쓰고 있는지 덤덤하게 적는 문단입니다.", "내일 써 볼 다음 글을 예고하며 끝내는 문단입니다."],
+  "footnote": "이 글의 자료 성격과 직접 확인이 필요한 부분을 밝히는 한 문단입니다.",
+  "sources": ["참고한 자료 이름과 출처 (검색해서 본 것만)"]
 }`;
 }
 
@@ -171,21 +175,57 @@ function structureGuide(shape, settings, count) {
   }
 
   lines.push(
+    '- checklist: 마무리 직전에 "이것까지 같이 보세요" 2열 표를 하나 더 넣습니다. '
+    + '왼쪽은 확인할 항목, 오른쪽은 내가 그걸 왜 중요하게 봤는지. 5~6줄.',
     '- 어느 한 군데에는 남들이 쓴 글에는 없을, 직접 해 보지 않으면 모를 디테일을 한두 문장 넣으세요. '
     + '("케이블이 미묘하게 짧아서 콘센트 위치를 먼저 보는 게 낫더라고요" 같은 것)',
-    '- outro: 억지 요약 없이, 내일 할 일이나 개인적인 다짐으로 덤덤하게 끝내는 2문단.',
+    '- outro: 억지 요약 없이 덤덤하게 끝내는 2문단. '
+    + '마지막 문단에는 이어서 쓸 다음 글을 예고하세요. '
+    + '("내일은 범위를 좁혀서 서울권과 경기권을 따로 나눠보려고 합니다" 같은 한 문장)',
   );
   return lines.join('\n');
 }
 
-const HONESTY_BLOCK = [
-  '[사실관계]',
-  '- 실시간 검색을 할 수 없으므로, 공식 조사 수치나 연도별 통계를 지어내지 마세요.',
-  '- 가격이나 사양을 적을 때는 "대략 4만 원대" 처럼 범위로 쓰고, 소수점까지 정확한 척하지 마세요.',
-  '- 순위는 절대적인 우열이 아니라 "널리 알려진 정보를 정리한 참고 순서" 로 다루세요.',
-  '- table.note 에는 "공식 순위가 아니라 일반적으로 알려진 정보를 정리한 참고 자료이며 '
-  + '최신 정보는 직접 확인이 필요하다"는 안내를 완전한 문장으로 넣으세요.',
-  '- 모르는 제도나 금액은 "지역과 시기에 따라 다릅니다" 처럼 정직하게 여지를 두고 쓰세요.',
+/**
+ * 검색을 쓸 수 있을 때와 없을 때는 "정직하게 쓰는 법" 자체가 달라진다.
+ *
+ * 검색이 막혀 있으면 수치를 아예 못 쓰게 막는 것이 최선이지만,
+ * 그러면 글에 근거가 사라져서 누구나 쓸 수 있는 뻔한 글이 된다.
+ * 검색이 열려 있으면 반대로 "확인한 것만, 출처와 함께" 쓰라고 요구한다.
+ */
+function honestyBlock(canSearch) {
+  if (!canSearch) {
+    return [
+      '[사실관계]',
+      '- 실시간 검색을 할 수 없으므로, 공식 조사 수치나 연도별 통계를 지어내지 마세요.',
+      '- 가격이나 사양을 적을 때는 "대략 4만 원대" 처럼 범위로 쓰고, 소수점까지 정확한 척하지 마세요.',
+      '- 순위는 절대적인 우열이 아니라 "널리 알려진 정보를 정리한 참고 순서" 로 다루세요.',
+      '- 모르는 제도나 금액은 "지역과 시기에 따라 다릅니다" 처럼 정직하게 여지를 두고 쓰세요.',
+    ].join('\n');
+  }
+  return [
+    '[사실관계 — 검색해서 확인하고 쓰세요]',
+    '- WebSearch 도구를 쓸 수 있습니다. 글을 쓰기 전에 이 주제의 최신 자료를 먼저 검색하세요.',
+    '- 순위, 통계, 가격, 제도처럼 사람들이 확인하러 들어오는 숫자는 반드시 검색으로 확인하고 쓰세요. '
+    + '기억에 의존해 쓰지 마세요.',
+    '- 수치를 쓸 때는 어디서 나온 숫자인지 문장 안에 밝히세요. '
+    + '("2026 QS 자료를 보면 서울대학교가 세계 38위로 나타나고 있어요" 처럼)',
+    '- 검색해도 확인이 안 되는 숫자는 그냥 쓰지 마세요. 빼거나 "지역과 시기에 따라 다릅니다" 로 넘기세요.',
+    '- sources 에 실제로 참고한 자료를 3~6개 적으세요. 검색해서 본 것만 적고, 지어내지 마세요.',
+    '- 검색 결과가 서로 다르면 그 사실 자체를 글에 적으세요. 어느 한쪽만 골라 단정하지 마세요.',
+  ].join('\n');
+}
+
+/** 이 글이 어디까지 말할 수 있는지 스스로 밝히게 하는 블록. */
+const CAUTION_BLOCK = [
+  '[신뢰도 — 이 세 가지가 글의 급을 가릅니다]',
+  '- disclaimer: 본론에 들어가기 전에 "이 주제에서 사람들이 오해하는 것"을 먼저 짚으세요. '
+  + '특히 공식적으로 존재하지 않는 것을 있는 것처럼 다루면 안 됩니다. '
+  + '("교육부나 대교협에서 공식적으로 발표하는 대학 서열은 없습니다" 같은 문장)',
+  '- 본문 중간에 이 글의 한계를 한 번 더 짚으세요. '
+  + '("24위와 25위가 정확히 한 단계 차이라고 받아들이는 건 추천하지 않습니다" 같은 문장)',
+  '- footnote: 글 맨 끝에 이 자료의 성격과 확인이 필요한 부분을 한 문단으로 적으세요.',
+  '- table.note 에는 이 표가 공식 자료가 아니라는 점과 직접 확인이 필요하다는 안내를 넣으세요.',
 ].join('\n');
 
 /**
@@ -210,7 +250,7 @@ const FORMAT_BLOCK = [
 /* 프롬프트 조립                                                        */
 /* ------------------------------------------------------------------ */
 
-function buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count }) {
+function buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count, canSearch }) {
   const withTableRows = shape !== 'table';   // 큰 표는 뒤에서 따로 채운다.
   const tableHint = withTableRows
     ? `- table.rows 를 ${count ? `${count}개` : '항목 수만큼'} 빠짐없이 채우세요. "이하 생략" 금지.`
@@ -233,7 +273,9 @@ ${buildRuleBlock(settings, shape)}
 ${structureGuide(shape, settings, count)}
 ${tableHint}
 
-${HONESTY_BLOCK}
+${honestyBlock(canSearch)}
+
+${CAUTION_BLOCK}
 
 ${FORMAT_BLOCK}
 
@@ -377,12 +419,16 @@ export function normalize(raw, topic, settings, shape = 'general') {
       accent,
     },
     intro: toParagraphList(raw.intro),
+    disclaimer: toParagraphList(raw.disclaimer),
     criteria: settings.post.addCriteria && shape !== 'general'
       ? normalizeCriteria(raw.criteria)
       : null,
     table: normalizeTable(raw.table),
     sections,
+    checklist: normalizeTable(raw.checklist),
     outro: toParagraphList(raw.outro),
+    footnote: stripTags(raw.footnote || ''),
+    sources: toParagraphList(raw.sources).slice(0, 8),
     model: '',
     costUsd: 0,
     compliance: null,
@@ -418,8 +464,12 @@ function toAiJson(post) {
     })),
     outro: post.outro,
   };
+  if (post.disclaimer?.length) out.disclaimer = post.disclaimer;
   if (post.criteria) out.criteria = post.criteria;
   if (post.table) out.table = post.table;
+  if (post.checklist) out.checklist = post.checklist;
+  if (post.footnote) out.footnote = post.footnote;
+  if (post.sources?.length) out.sources = post.sources;
   return out;
 }
 
@@ -543,9 +593,14 @@ export async function generatePost(topic, options = {}) {
     logger.info(`항목이 ${count}개라 표를 나눠 받고 대표 항목만 상세하게 씁니다.`);
   }
 
+  const canSearch = settings.claude.webSearch !== false;
+  if (canSearch) {
+    logger.info(`[${topic}] 자료를 검색해서 확인하며 씁니다. 이 단계가 1~3분 더 걸립니다.`);
+  }
+
   const reply = await runClaudeJson(
-    buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count }),
-    { systemPrompt, signal: options.signal },
+    buildMainPrompt(topic, settings, { guidelineBlock, exampleBlock, shape, count, canSearch }),
+    { systemPrompt, signal: options.signal, webSearch: canSearch },
   );
 
   let post = normalize(reply.data, topic, settings, shape);
