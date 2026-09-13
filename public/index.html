@@ -54,9 +54,11 @@
       <button class="btn ghost" id="btn-clear-text">입력 지우기</button>
     </div>
     <p class="note">주제에 <b>TOP100</b>, <b>50가지</b>, <b>베스트 30</b> 처럼 개수가 들어 있으면
-      그 개수만큼 표를 채웁니다. 개수 없이 <b>"~~~ 순위"</b> 라고만 써도 30개를 목표로 최대한 많이 채웁니다.
+      그 개수만큼 표를 채웁니다. 개수 없이 <b>"~~~ 순위"</b> 라고만 써도
+      <b>100개</b>를 목표로 최대한 많이 채웁니다. (설정에서 조절)
+      뒤쪽 구간에서는 지방·소규모·전문 분야까지 넓혀서 찾습니다.
       자료가 모자라면 확인되는 데까지만 넣고, 빈 행을 지어내지는 않습니다.
-      (구간을 나눠 생성하므로 시간이 더 걸립니다)</p>
+      (25개씩 나눠 생성하므로 시간이 꽤 걸립니다)</p>
   </section>
 
   <section class="card" id="card-guide">
@@ -130,6 +132,7 @@
         <label>소제목 개수<input id="s-sections" type="number" min="2" max="6"><span class="sub">권장 3~4개</span></label>
         <label>독자<input id="s-audience" type="text"></label>
         <label class="check"><input id="s-criteria" type="checkbox"> 순위·비교 글 서두에 "고른 기준" 넣기</label>
+        <label>순위 글 표 크기<input id="s-rank-count" type="number" min="10" max="300" step="10"><span class="sub">개수를 안 쓴 "OO 순위" 주제에서 몇 개까지 채울지. 25개씩 나눠 받으므로 늘리면 그만큼 느려집니다</span></label>
 
         <label>썸네일 스타일
           <select id="s-thumb-style">

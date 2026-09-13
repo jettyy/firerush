@@ -221,6 +221,7 @@ function renderSettings() {
   $('s-sections').value = s.post.sectionCount;
   $('s-audience').value = s.post.audience;
   $('s-criteria').checked = Boolean(s.post.addCriteria);
+  $('s-rank-count').value = s.post.rankCount || 100;
   if (document.activeElement !== $('s-guideline')) {
     $('s-guideline').value = s.post.extraGuideline || '';
   }
@@ -327,6 +328,7 @@ function collectSettings() {
       audience: $('s-audience').value,
       extraGuideline: $('s-guideline').value,
       addCriteria: $('s-criteria').checked,
+      rankCount: Number($('s-rank-count').value),
     },
     image: {
       enabled: $('s-image-on').checked,

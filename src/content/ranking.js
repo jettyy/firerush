@@ -1,5 +1,6 @@
 import { runClaudeJson } from '../ai/claude.js';
 import { logger } from '../lib/events.js';
+import { getSettings } from '../lib/settings.js';
 
 /**
  * 주제의 "모양"을 정하는 모듈.
@@ -24,12 +25,21 @@ export const ITEM_LIMIT = 12;
  *
  * 개수를 안 썼다고 5~6개만 적으면 검색해서 들어온 사람이 바로 나가버린다.
  * 넉넉하게 잡아두고, 모델이 아는 만큼만 채우게 둔다. (못 채운 행은 버린다)
+ * 설정(post.rankCount)으로 바꿀 수 있다.
  */
-export const DEFAULT_RANK_COUNT = 30;
+export const DEFAULT_RANK_COUNT = 100;
 
-/** 표 행만 나눠 받을 때 한 번에 요청하는 행 수. */
-const CHUNK_SIZE = 50;
-const MAX_COUNT = 200;
+/**
+ * 표 행만 나눠 받을 때 한 번에 요청하는 행 수.
+ *
+ * 한 번에 많이 달라고 하면 모델이 앞쪽만 성의 있게 채우고 뒤쪽을 흐지부지 끝낸다.
+ * 25개씩 끊으면 호출이 늘어나는 대신 구간마다 끝까지 채워준다.
+ */
+const CHUNK_SIZE = 25;
+const MAX_COUNT = 300;
+
+/** 빠진 구간을 다시 채우는 시도 횟수. 100행짜리는 구멍이 여러 군데 날 수 있다. */
+const MAX_REFILL_RANGES = 8;
 
 /** 표 행만 뽑는 호출에는 블로그 작법 지시가 필요 없다. 짧을수록 싸고 빠르다. */
 const ROW_SYSTEM = '표 데이터를 JSON 으로만 출력합니다. 설명을 붙이지 않습니다.';
@@ -75,7 +85,9 @@ export function detectShape(topic) {
   }
   if (rankWord) {
     // 개수를 안 썼어도 표를 넉넉히 채운다. 자료가 모자라면 채워진 만큼만 남는다.
-    return { shape: 'table', count: DEFAULT_RANK_COUNT, needsChunking: true, openEnded: true };
+    const wanted = Number(getSettings().post?.rankCount) || DEFAULT_RANK_COUNT;
+    const target = Math.max(10, Math.min(MAX_COUNT, wanted));
+    return { shape: 'table', count: target, needsChunking: true, openEnded: true };
   }
   if (pickWord) {
     return { shape: 'items', count: null, needsChunking: false };
@@ -106,8 +118,11 @@ function rankOf(row) {
   return matched ? Number(matched[0]) : null;
 }
 
-function buildChunkPrompt({ topic, headers, start, end, existingNames }) {
+function buildChunkPrompt({ topic, headers, start, end, existingNames, total }) {
   const expected = end - start + 1;
+  // 뒤쪽 구간일수록 "유명한 것"만 찾으면 칸이 빈다.
+  // 앞에서 이미 다 나갔기 때문이다. 범위를 넓히라고 분명히 일러준다.
+  const deep = start > Math.max(20, Math.round(total * 0.25));
   // 예시 행은 반드시 실제 열 개수와 같아야 한다.
   // 3칸짜리 예시를 고정으로 보여주면 열이 4개여도 3칸만 채워서 돌려준다.
   const sampleRow = (rank) => JSON.stringify(
@@ -122,6 +137,10 @@ function buildChunkPrompt({ topic, headers, start, end, existingNames }) {
 규칙
 - 아는 것을 최대한 끌어모아 ${expected}개를 꽉 채우는 것이 목표입니다. "이하 생략", "...", "(중략)" 금지.
 - 실제로 존재하는 항목의 이름을 쓰세요. 칸을 메우려고 "항목 1", "기타" 같은 가짜 항목을 만들지 마세요.
+${deep ? `- 여기는 ${total}개 중 뒤쪽 구간입니다. 아주 유명한 것은 앞 구간에서 이미 다 나갔습니다.
+  덜 알려진 곳, 지방·지역에 있는 곳, 규모가 작은 곳, 전문·특수 분야까지 넓혀서 채우세요.
+  유명한 것만 찾으려 하면 이 구간은 절대 못 채웁니다. 범위를 넓히는 것이 이 구간의 핵심입니다.`
+    : '- 앞 구간이므로 가장 대표적이고 널리 알려진 것부터 채우세요.'}
 - 이 주제에 해당하는 것이 ${expected}개보다 적다면, 아는 만큼만 출력하고 나머지 번호는 빼세요.
   억지로 지어내는 것보다 적게 나오는 편이 낫습니다.
 - 첫 칸은 번호 숫자만 (${start}~${end}).
@@ -151,7 +170,7 @@ export async function generateTableRows({
 
   const fetchRange = async (start, end) => {
     const existingNames = [...byRank.values()].map((row) => row[1]).filter(Boolean);
-    const prompt = buildChunkPrompt({ topic, headers, start, end, existingNames });
+    const prompt = buildChunkPrompt({ topic, headers, start, end, existingNames, total: count });
     const reply = await runClaudeJson(prompt, { systemPrompt: ROW_SYSTEM, signal });
     model = reply.model || model;
 
@@ -190,8 +209,8 @@ export async function generateTableRows({
     }
     ranges.push([head, prev]);
 
-    // 자료가 정말 없어서 비는 경우도 많다. 재요청은 3구간까지만 하고 접는다.
-    for (const [start, end] of ranges.slice(0, 3)) {
+    // 자료가 정말 없어서 비는 경우도 있다. 재요청 횟수는 정해두고 접는다.
+    for (const [start, end] of ranges.slice(0, MAX_REFILL_RANGES)) {
       try {
         await fetchRange(start, end);
       } catch (error) {
