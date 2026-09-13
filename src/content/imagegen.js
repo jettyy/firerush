@@ -40,12 +40,18 @@ function buildPrompt(post) {
   ].join(' ');
 }
 
-/** Imagen 계열은 :predict, Gemini 계열은 :generateContent 로 형식이 다르다. */
+/**
+ * 구글은 이미지 모델 계열마다 호출 형식이 다르고, 한 번 갈아엎은 전례도 있다.
+ * (Imagen 4 계열은 2026년 8월 17일에 종료되고 Gemini 이미지 모델로 넘어갔다)
+ * 그래서 모델 이름을 설정으로 빼두고, 두 형식을 모두 지원한다.
+ * 나중에 또 바뀌어도 설정에서 모델 이름만 바꾸면 된다.
+ */
 function isImagen(model) {
   return /^imagen/i.test(model);
 }
 
 function buildRequest(model, prompt) {
+  // 옛 Imagen 계열: :predict + instances/parameters
   if (isImagen(model)) {
     return {
       url: `${HOST}/${model}:predict`,
@@ -55,11 +61,17 @@ function buildRequest(model, prompt) {
       },
     };
   }
+  // 현행 Gemini 이미지 모델: :generateContent + contents/generationConfig
   return {
     url: `${HOST}/${model}:generateContent`,
     body: {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ['IMAGE'] },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        // 이미지만 달라고 하면 거부당한다. 텍스트를 함께 받아야 한다.
+        // (돌려받은 텍스트는 쓰지 않고 그림 조각만 꺼낸다)
+        responseModalities: ['TEXT', 'IMAGE'],
+        imageConfig: { aspectRatio: '16:9' },
+      },
     },
   };
 }
@@ -77,16 +89,25 @@ function extractBase64(data) {
   return '';
 }
 
-/** 응답이 오류일 때 사람이 읽을 수 있는 이유를 뽑아낸다. */
+/**
+ * 응답이 오류일 때 사람이 읽을 수 있는 이유를 뽑아낸다.
+ *
+ * 404 는 대개 "그 모델이 없어졌다" 는 뜻이다. 구글이 이미지 모델을 한 번
+ * 통째로 갈아엎은 적이 있어서, 무엇을 해야 하는지까지 같이 알려준다.
+ */
 function errorReason(status, text) {
+  let detail = String(text || '').slice(0, 200);
   try {
     const parsed = JSON.parse(text);
-    const message = parsed?.error?.message || parsed?.error?.status;
-    if (message) return `${status} ${message}`;
+    detail = parsed?.error?.message || parsed?.error?.status || detail;
   } catch {
-    // JSON 이 아니면 앞부분을 그대로 보여준다.
+    // JSON 이 아니면 앞부분을 그대로 쓴다.
   }
-  return `${status} ${String(text || '').slice(0, 200)}`;
+  const hint = status === 404
+    ? ' — 이 모델이 없어졌거나 이름이 바뀐 것 같습니다. 설정의 "이미지 모델"을 '
+      + '현재 쓸 수 있는 이름으로 바꿔주세요. (구글 AI Studio 의 모델 목록에서 확인)'
+    : '';
+  return `${status} ${detail}${hint}`;
 }
 
 /**
@@ -105,7 +126,7 @@ export async function generateBackground(post, { jobId = '', signal } = {}) {
     return null;
   }
 
-  const model = image.model || 'imagen-4.0-fast-generate-001';
+  const model = image.model || 'gemini-3.1-flash-image';
   const { url, body } = buildRequest(model, buildPrompt(post));
 
   const controller = new AbortController();
@@ -157,7 +178,7 @@ export async function testImageApi() {
   const image = settings.image || {};
   if (!image.apiKey) return { ok: false, message: 'API 키를 먼저 입력하고 저장하세요.' };
 
-  const model = image.model || 'imagen-4.0-fast-generate-001';
+  const model = image.model || 'gemini-3.1-flash-image';
   const { url, body } = buildRequest(model, 'A simple flat vector illustration of a blue circle on a light background. No text.');
 
   try {

@@ -66,7 +66,10 @@ export const DEFAULT_SETTINGS = {
   image: {
     enabled: false,              // API 키를 넣고 켜야 동작한다. 꺼져 있으면 지금까지와 똑같다.
     provider: 'google',
-    model: 'imagen-4.0-fast-generate-001',   // 가장 저렴한 등급
+    // 구글이 Imagen 4 계열(imagen-4.0-*)을 2026-08-17 에 종료했다.
+    // 후속은 Gemini 이미지 모델이고 호출 형식도 다르다(:predict → :generateContent).
+    // 또 바뀔 수 있으므로 이름을 여기서 바꿀 수 있게 빼뒀다. 404 가 나면 이 값만 고치면 된다.
+    model: 'gemini-3.1-flash-image',
     apiKey: '',                  // 이 파일은 .gitignore 대상이라 저장소에 올라가지 않는다.
     timeoutMs: 60000,
   },
