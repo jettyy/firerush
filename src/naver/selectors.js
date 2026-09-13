@@ -33,6 +33,25 @@ export const SELECTORS = {
     'button[title="사진"]',
   ],
 
+  // 왼쪽 정렬 버튼.
+  // 에디터는 문단 정렬을 자체 클래스로 관리해서 붙여넣은 text-align 을 무시한다.
+  // 지난번에 쓴 정렬이 그대로 남아 있으면 새 글도 그 정렬로 들어간다.
+  alignLeft: [
+    'button[data-name="align-left"]',
+    'button[data-value="left"]',
+    '.se-toolbar button[title*="왼쪽"]',
+    'button[title="왼쪽정렬"]',
+    'button[title="왼쪽 정렬"]',
+    'button[data-log="ect.alignleft"]',
+  ],
+
+  // 정렬 드롭다운 (버튼이 메뉴 안에 숨어 있는 경우 먼저 펼쳐야 한다)
+  alignMenu: [
+    'button[data-name="align"]',
+    '.se-toolbar button[title*="정렬"]',
+    'button[data-log="ect.align"]',
+  ],
+
   // 임시저장 버튼 (발행 버튼과 헷갈리지 않도록 텍스트가 정확히 "저장"인 것)
   saveButton: [
     'button.save_btn__bzc5B',

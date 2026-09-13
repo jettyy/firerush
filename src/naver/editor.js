@@ -253,6 +253,44 @@ async function insertTable(page, scope, step, jobId) {
   }
 }
 
+/**
+ * 본문 전체를 왼쪽 정렬로 맞춘다.
+ *
+ * 에디터는 문단 정렬을 자체 클래스로 관리해서, 붙여넣은 HTML 의 text-align 은
+ * 무시된다. 게다가 지난번에 가운데 정렬로 쓴 글이 있으면 그 설정이 남아 있어서
+ * 새 글도 가운데로 들어간다. 그래서 에디터 기능으로 직접 걸어줘야 한다.
+ *
+ * 본문 안에서 전체 선택 → 왼쪽 정렬 → 선택 해제 순서로 한다.
+ * (제목은 다른 영역이라 이 선택에 딸려오지 않는다)
+ */
+async function alignBodyLeft(page, scope, jobId) {
+  try {
+    const { locator } = await findFirst(scope, SELECTORS.body, 8000);
+    await locator.first().click({ timeout: 8000 });
+    await page.keyboard.press(`${MODIFIER}+A`);
+    await page.waitForTimeout(200);
+
+    // 툴바 버튼이 있으면 그걸 쓴다. 메뉴 안에 숨어 있으면 먼저 펼친다.
+    let clicked = await clickIfPresent(scope, SELECTORS.alignLeft, 1500);
+    if (!clicked) {
+      await clickIfPresent(scope, SELECTORS.alignMenu, 1500);
+      await page.waitForTimeout(250);
+      clicked = await clickIfPresent(scope, SELECTORS.alignLeft, 1500);
+    }
+    // 버튼을 못 찾으면 단축키로 시도한다.
+    if (!clicked) await page.keyboard.press(`${MODIFIER}+Shift+L`);
+
+    await page.waitForTimeout(300);
+    // 선택을 풀고 커서를 글 끝으로 보낸다. 선택된 채로 두면 다음 동작이 글을 지운다.
+    await page.keyboard.press('ArrowDown').catch(() => {});
+    await page.keyboard.press('End').catch(() => {});
+    logger.info(`본문을 왼쪽 정렬로 맞췄습니다. (${clicked || '단축키'})`, { jobId });
+  } catch (error) {
+    // 정렬 하나 때문에 글 전체를 버릴 이유는 없다.
+    logger.warn(`왼쪽 정렬을 걸지 못했습니다: ${error.message.split('\n')[0]}`, { jobId });
+  }
+}
+
 /** 현재 커서 위치에 이미지를 넣는다. */
 async function insertImage(page, scope, imagePath) {
   const { locator } = await findFirst(scope, SELECTORS.imageButton, 10000);
@@ -391,6 +429,10 @@ export async function publishDraft({ post, thumbnailPath, contentImagePaths = []
       await page.waitForTimeout(250);
     }
     logger.info(`본문 입력 완료 (텍스트 ${plan.filter((s) => s.type === 'html').length}조각, 이미지 ${imagesInserted}장)`, { jobId });
+
+    // 저장 직전에 한 번에 맞춘다. 붙여넣기마다 하면 그때그때 선택을 잡느라 느리고,
+    // 어차피 마지막에 전체를 한 번 훑으면 중간에 가운데로 들어온 것까지 다 잡힌다.
+    await alignBodyLeft(page, scope, jobId);
 
     const confirmed = await saveDraft(page, scope);
     return { saved: true, confirmed, blogId };
