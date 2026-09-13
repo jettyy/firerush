@@ -79,24 +79,38 @@ function rankModel(id) {
   };
 }
 
-/** 계정에서 쓸 수 있는 이미지 모델 중 가장 싼 것을 고른다. */
+/**
+ * 계정에서 쓸 수 있는 이미지 모델 중 가장 싼 것을 고른다.
+ *
+ * 목록은 여러 장으로 나뉘어 온다. 첫 장만 보면 이미지 모델이 뒷장에 있을 때
+ * "쓸 수 있는 모델이 없다" 고 잘못 판단하므로 끝까지 넘겨본다.
+ */
 async function pickCheapestModel(apiKey) {
-  const response = await fetch(MODEL_LIST_URL, {
-    method: 'GET',
-    headers: { 'x-goog-api-key': apiKey },
-  });
-  if (!response.ok) {
-    throw new Error(errorReason(response.status, await response.text()));
-  }
-
   const candidates = [];
-  for (const entry of (await response.json())?.models || []) {
-    const id = String(entry?.name || '').replace(/^models\//, '');
-    const methods = entry?.supportedGenerationMethods || [];
-    // 이미지를 만들어 주는 호출을 지원해야 한다.
-    if (!methods.includes('generateContent') && !methods.includes('predict')) continue;
-    const rank = rankModel(id);
-    if (rank) candidates.push({ id, ...rank });
+  let pageToken = '';
+
+  for (let page = 0; page < 10; page += 1) {
+    const url = new URL(MODEL_LIST_URL);
+    url.searchParams.set('pageSize', '200');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const response = await fetch(url, { method: 'GET', headers: { 'x-goog-api-key': apiKey } });
+    if (!response.ok) {
+      throw new Error(errorReason(response.status, await response.text()));
+    }
+    const data = await response.json();
+
+    for (const entry of data?.models || []) {
+      const id = String(entry?.name || '').replace(/^models\//, '');
+      const methods = entry?.supportedGenerationMethods || [];
+      // 이미지를 만들어 주는 호출을 지원해야 한다.
+      if (!methods.includes('generateContent') && !methods.includes('predict')) continue;
+      const rank = rankModel(id);
+      if (rank) candidates.push({ id, ...rank });
+    }
+
+    pageToken = data?.nextPageToken || '';
+    if (!pageToken) break;
   }
 
   if (!candidates.length) throw new Error('계정에서 쓸 수 있는 이미지 생성 모델을 찾지 못했습니다.');
@@ -205,7 +219,15 @@ export async function generateBackground(post, { jobId = '', signal } = {}) {
   const settings = getSettings();
   const image = settings.image || {};
 
-  if (!image.enabled) return null;
+  // 왜 그림이 안 들어갔는지는 로그만 보고도 알 수 있어야 한다.
+  // 조용히 넘어가면 설정을 켠 줄 알았던 사람이 원인을 찾을 방법이 없다.
+  if (!image.enabled) {
+    logger.info(
+      '썸네일 배경 그림은 건너뜁니다 — 설정에서 "상단 썸네일 배경을 이미지 생성 AI로 그리기"가 꺼져 있습니다.',
+      { jobId },
+    );
+    return null;
+  }
   if (!image.apiKey) {
     logger.warn('이미지 생성이 켜져 있지만 API 키가 비어 있습니다. 기존 썸네일로 만듭니다.', { jobId });
     return null;

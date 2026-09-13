@@ -28,6 +28,18 @@ async function renderHtmlToPng(html, { width, height, filePath }) {
         new Promise((resolve) => setTimeout(resolve, 3000)),
       ]))
       .catch(() => {});
+    // 배경 그림이 다 그려지기 전에 찍으면 그림이 빠진 채로 저장된다.
+    await page
+      .evaluate(() => Promise.race([
+        Promise.all([...document.images].map((img) => (
+          img.complete ? null : new Promise((resolve) => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          })
+        ))),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]))
+      .catch(() => {});
     await page.waitForTimeout(250);
     await page.screenshot({ path: filePath, type: 'png' });
     return fs.statSync(filePath).size;
