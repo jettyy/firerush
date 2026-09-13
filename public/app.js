@@ -240,7 +240,6 @@ function renderSettings() {
   const image = s.image || {};
   $('s-image-on').checked = Boolean(image.enabled);
   $('s-image-mode').value = image.mode || 'full';
-  $('s-image-prefer').value = image.prefer || 'cheap';
   if (document.activeElement !== $('s-image-key')) $('s-image-key').value = image.apiKey || '';
   $('s-enforce').checked = Boolean(s.quality.enforce);
   $('s-repairs').value = s.quality.maxRepairs;
@@ -342,7 +341,6 @@ function collectSettings() {
     image: {
       enabled: $('s-image-on').checked,
       mode: $('s-image-mode').value,
-      prefer: $('s-image-prefer').value,
       apiKey: $('s-image-key').value.trim(),
     },
     thumbnail: {

@@ -6,8 +6,8 @@
  *   background 글자 없는 배경만 받고 한글은 HTML 템플릿이 얹는다.
  *              한글이 절대 안 깨지는 대신 덜 화려하다.
  *
- * 한글이 깨져 나오면 설정에서 background 로 내리거나, 모델 우선순위를
- * "품질 우선"으로 바꾸면 된다. pro 등급이 글자를 훨씬 정확하게 그린다.
+ * 모델은 계정에서 쓸 수 있는 것 중 항상 가장 싼 것을 고른다.
+ * 한글이 깨져 나오면 설정에서 background 로 내리면 된다.
  *
  * 본문 강조 카드 3장은 여기를 거치지 않는다. 지금처럼 HTML 캡처 그대로다.
  * 돈이 드는 건 글 한 편당 상단 썸네일 한 장뿐이다.
@@ -110,19 +110,13 @@ let resolved = { key: '', model: '' };
  * 이미지 "생성" 모델인지 보고, 싼 순서를 매긴다.
  * 점수가 낮을수록 먼저 고른다. 후보가 아니면 null.
  */
-function rankModel(id, prefer) {
+function rankModel(id) {
   if (!/image/i.test(id)) return null;        // 이미지 생성 모델이 아니다
-  if (/ultra/i.test(id)) return null;         // 가장 비싼 등급은 쓰지 않는다
-
-  // flash 가 싸고, pro 가 글자를 정확하게 그린다.
-  // 한글을 그림 안에 넣을 때는 pro 쪽이 덜 깨진다.
-  const isFlash = /flash/i.test(id);
-  const isPro = /pro/i.test(id);
-  const cheapFirst = isFlash ? 0 : (isPro ? 2 : 1);
-  const qualityFirst = isPro ? 0 : (isFlash ? 2 : 1);
+  if (/ultra/i.test(id)) return null;         // 가장 비싼 등급
 
   return {
-    tier: prefer === 'quality' ? qualityFirst : cheapFirst,
+    // flash 가 가장 싸다. pro 는 맨 뒤로 민다.
+    tier: /flash/i.test(id) ? 0 : (/pro/i.test(id) ? 2 : 1),
     preview: /preview|exp\b/i.test(id) ? 1 : 0,
     // 같은 등급이면 최신 버전이 품질 대비 유리하다.
     version: Number.parseFloat((id.match(/(\d+(?:\.\d+)?)/) || [])[1] || '0'),
@@ -135,7 +129,7 @@ function rankModel(id, prefer) {
  * 목록은 여러 장으로 나뉘어 온다. 첫 장만 보면 이미지 모델이 뒷장에 있을 때
  * "쓸 수 있는 모델이 없다" 고 잘못 판단하므로 끝까지 넘겨본다.
  */
-async function pickBestModel(apiKey, prefer) {
+async function pickCheapestModel(apiKey) {
   const candidates = [];
   let pageToken = '';
 
@@ -155,7 +149,7 @@ async function pickBestModel(apiKey, prefer) {
       const methods = entry?.supportedGenerationMethods || [];
       // 이미지를 만들어 주는 호출을 지원해야 한다.
       if (!methods.includes('generateContent') && !methods.includes('predict')) continue;
-      const rank = rankModel(id, prefer);
+      const rank = rankModel(id);
       if (rank) candidates.push({ id, ...rank });
     }
 
@@ -179,14 +173,12 @@ async function resolveModel(image, { jobId = '' } = {}) {
   const pinned = String(image.model || '').trim();
   if (pinned && !RETIRED.test(pinned)) return pinned;
 
-  const prefer = image.prefer === 'quality' ? 'quality' : 'cheap';
-  const cacheKey = `${image.apiKey}|${prefer}`;
-  if (resolved.key === cacheKey && resolved.model) return resolved.model;
+  if (resolved.key === image.apiKey && resolved.model) return resolved.model;
 
   try {
-    const picked = await pickBestModel(image.apiKey, prefer);
-    resolved = { key: cacheKey, model: picked };
-    logger.info(`이미지 모델을 자동으로 골랐습니다: ${picked}`, { jobId });
+    const picked = await pickCheapestModel(image.apiKey);
+    resolved = { key: image.apiKey, model: picked };
+    logger.info(`가장 저렴한 이미지 모델을 골랐습니다: ${picked}`, { jobId });
     return picked;
   } catch (error) {
     logger.warn(
