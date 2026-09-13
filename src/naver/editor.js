@@ -108,6 +108,21 @@ async function typeInto(page, locator, text) {
   }
 }
 
+/**
+ * 에디터 안에 들어간 표 개수.
+ *
+ * 붙여넣기 성공 판정은 "글자가 좀 늘었나" 만 보기 때문에, 표가 통째로
+ * 잘려나가도 성공으로 친다. 표는 따로 세어서 실제로 들어갔는지 확인한다.
+ */
+async function tableCount(scope) {
+  return scope
+    .evaluate(() => {
+      const root = document.querySelector('.se-main-container') || document.body;
+      return root.querySelectorAll('table').length;
+    })
+    .catch(() => 0);
+}
+
 async function bodyTextLength(scope) {
   return scope
     .evaluate(() => {
@@ -308,8 +323,23 @@ export async function publishDraft({ post, thumbnailPath, contentImagePaths = []
         logger.info(`본문 강조 카드 이미지 삽입 (${imagesInserted}/3)`, { jobId });
         continue;
       }
+      const tablesBefore = step.hasTable ? await tableCount(scope) : 0;
       lastMode = await pasteHtml(page, scope, BLOCK_GAP + step.html);
-      if (plan.length > 3) {
+
+      if (step.hasTable) {
+        const rows = (step.html.match(/<tr/g) || []).length;
+        if ((await tableCount(scope)) > tablesBefore) {
+          logger.info(`표 입력 완료 (${rows}행, ${lastMode})`, { jobId });
+        } else {
+          // 여기서 멈추지는 않는다. 표 하나 때문에 글 전체를 버리는 건 손해다.
+          // 대신 무엇이 빠졌는지 분명히 남겨서 사람이 손으로 채울 수 있게 한다.
+          logger.warn(
+            `표가 에디터에 들어가지 않았습니다 (${rows}행). 글은 그대로 저장하되, `
+            + `표는 data/posts 의 preview.html 에서 복사해 직접 넣으셔야 합니다.`,
+            { jobId },
+          );
+        }
+      } else if (plan.length > 3) {
         logger.info(`본문 텍스트 조각 입력 (${lastMode})`, { jobId });
       }
       await page.waitForTimeout(250);

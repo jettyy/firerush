@@ -87,34 +87,35 @@ function sourcesHtml(sources) {
 export function buildTableHtml(table) {
   if (!table?.headers?.length || !table.rows?.length) return '';
 
+  // 셀마다 테두리·여백·글자크기를 박으면 100행짜리 표가 50KB 를 넘고,
+  // 그 덩치를 에디터가 감당하지 못해 표를 통째로 흘려버린다.
+  // 테두리와 여백은 table 의 border/cellpadding 속성이, 글자 크기는 상속이 해준다.
+  // 셀에는 색만 남긴다 (비워두면 앞 블록의 회색을 물려받는다).
   const th = table.headers
     .map((header) => (
-      `<th style="border:1px solid #d8dee4; padding:9px 10px; background:#f3f6f8; ` +
-      `font-size:15px; font-weight:700; text-align:left; color:${BLACK};">${inline(header)}</th>`
+      `<th style="background:#f3f6f8; color:${BLACK};">${inline(header)}</th>`
     ))
     .join('');
 
   const trs = table.rows
-    .map((row, index) => {
+    .map((row) => {
       const tds = row
         .map((cell, column) => (
-          `<td style="border:1px solid #d8dee4; padding:8px 10px; font-size:15px; ` +
-          `line-height:1.6; color:${BLACK};` +
-          `${column === 0 ? ' text-align:center; font-weight:600;' : ''}">` +
-          `${inline(cell)}</td>`
+          `<td style="color:${BLACK};${column === 0 ? 'text-align:center;font-weight:600;' : ''}">`
+          + `${inline(cell)}</td>`
         ))
         .join('');
-      const stripe = index % 2 === 1 ? ' style="background:#fafbfc;"' : '';
-      return `<tr${stripe}>${tds}</tr>`;
+      return `<tr>${tds}</tr>`;
     })
     .join('');
 
   const parts = [];
   if (table.heading) parts.push(heading(table.heading));
   parts.push(
-    `<table border="1" cellspacing="0" cellpadding="6" ` +
-    `style="border-collapse:collapse; width:100%; margin:16px 0; color:${BLACK};">` +
-    `<thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`,
+    `<table border="1" cellspacing="0" cellpadding="6" `
+    + `style="border-collapse:collapse; width:100%; margin:16px 0; `
+    + `font-size:15px; line-height:1.6; color:${BLACK};">`
+    + `<thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`,
   );
   if (table.note) {
     parts.push(
@@ -190,10 +191,10 @@ function bodyPieces(post) {
   if (tableHtml && !post.sections.length) pieces.push(tableHtml);
 
   // "이것까지 같이 보세요" 표는 마무리 직전이 제자리다.
+  // 소제목은 buildTableHtml 이 table.heading 으로 이미 그린다. 여기서 또 넣으면 두 번 나온다.
   const checklistHtml = buildTableHtml(post.checklist);
   if (checklistHtml) {
     pieces.push(divider());
-    if (post.checklist.heading) pieces.push(heading(post.checklist.heading));
     pieces.push(checklistHtml);
   }
 
@@ -272,15 +273,39 @@ export function buildBodyPlan(post, cardAvailable = [false, false, false]) {
   const plan = [];
   let cursor = 0;
   for (const slot of slots) {
-    const segment = pieces.slice(cursor, slot.point);
-    if (segment.length) plan.push({ type: 'html', html: segment.join(SPACER) });
+    pushHtmlSteps(plan, pieces.slice(cursor, slot.point));
     plan.push({ type: 'image', cardIndex: slot.cardIndex });
     cursor = slot.point;
   }
-  const rest = pieces.slice(cursor);
-  if (rest.length) plan.push({ type: 'html', html: rest.join(SPACER) });
+  pushHtmlSteps(plan, pieces.slice(cursor));
 
   return plan;
+}
+
+/**
+ * 조각들을 붙여넣기 단계로 만든다. 표는 따로 떼어 한 번에 하나씩 붙인다.
+ *
+ * 100행짜리 표는 HTML 만 수십 KB 다. 다른 본문과 묶어서 한 번에 붙이면
+ * 에디터가 덩어리를 감당하지 못하고 표만 통째로 흘려버린다.
+ * 표를 따로 붙이면 payload 가 작아지고, 실패해도 어느 표가 빠졌는지 알 수 있다.
+ */
+function pushHtmlSteps(plan, segment) {
+  let buffer = [];
+  const flush = () => {
+    if (!buffer.length) return;
+    plan.push({ type: 'html', html: buffer.join(SPACER) });
+    buffer = [];
+  };
+
+  for (const piece of segment) {
+    if (piece.includes('<table')) {
+      flush();
+      plan.push({ type: 'html', html: piece, hasTable: true });
+      continue;
+    }
+    buffer.push(piece);
+  }
+  flush();
 }
 
 /** 클립보드에는 text/html 과 text/plain 을 같이 넣어야 붙여넣기가 안정적이다. */
