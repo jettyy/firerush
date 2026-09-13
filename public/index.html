@@ -113,6 +113,12 @@
         <label class="wide hidden" id="model-custom-wrap">직접 입력할 모델 이름
           <input id="s-model-custom" type="text" placeholder="예: claude-opus-4-6">
         </label>
+        <label class="wide">표의 행을 채울 모델
+          <select id="s-table-model"></select>
+          <span class="sub">표 행 채우기는 이름 나열이라 판단력이 거의 필요 없습니다.
+            TOP100 글은 호출 대부분이 표 행이라, 여기만 싼 모델로 내려도 본문 품질은 그대로 두고
+            사용량을 아낄 수 있습니다.</span>
+        </label>
 
         <label class="wide check"><input id="s-persona" type="checkbox"> 정해진 화자(페르소나)로 1인칭 경험담처럼 쓰기</label>
         <label>블로그 닉네임<input id="s-nickname" type="text" placeholder="예: 두배파파"></label>

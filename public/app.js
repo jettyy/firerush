@@ -97,6 +97,14 @@ function renderModels() {
     .map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.label)}</option>`)
     .join('') + `<option value="${CUSTOM_MODEL}">직접 입력…</option>`;
 
+  const tableSelect = $('s-table-model');
+  tableSelect.innerHTML = '<option value="">본문과 같은 모델 사용</option>'
+    + (state.models || [])
+      .filter((model) => model.id)
+      .map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.label)}</option>`)
+      .join('');
+  tableSelect.value = state.settings?.claude?.tableModel || '';
+
   if (current && !known) {
     select.value = CUSTOM_MODEL;
     $('s-model-custom').value = current;
@@ -312,7 +320,7 @@ function collectSettings() {
   const model = select.value === CUSTOM_MODEL ? $('s-model-custom').value.trim() : select.value;
   return {
     blogId: $('blog-id').value.trim(),
-    claude: { model },
+    claude: { model, tableModel: $('s-table-model').value },
     persona: {
       enabled: $('s-persona').checked,
       nickname: $('s-nickname').value.trim(),

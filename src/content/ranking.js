@@ -168,10 +168,17 @@ export async function generateTableRows({
   const byRank = new Map();
   let model = '';
 
+  // 표 행 채우기는 판단력이 거의 필요 없는 나열 작업이라 본문보다 싼 모델로 돌린다.
+  const settings = getSettings();
+  const rowModel = settings.claude.tableModel || settings.claude.model;
+  if (rowModel && rowModel !== settings.claude.model) {
+    logger.info(`표의 행은 ${rowModel} 으로 채웁니다. (본문과 따로)`);
+  }
+
   const fetchRange = async (start, end) => {
     const existingNames = [...byRank.values()].map((row) => row[1]).filter(Boolean);
     const prompt = buildChunkPrompt({ topic, headers, start, end, existingNames, total: count });
-    const reply = await runClaudeJson(prompt, { systemPrompt: ROW_SYSTEM, signal });
+    const reply = await runClaudeJson(prompt, { systemPrompt: ROW_SYSTEM, signal, model: rowModel });
     model = reply.model || model;
 
     for (const row of normalizeRows(reply.data?.rows, columnCount)) {
