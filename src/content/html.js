@@ -68,18 +68,22 @@ function footnote(text) {
   );
 }
 
-/** 검색해서 참고한 자료 목록. */
+/**
+ * 검색해서 참고한 자료 목록.
+ *
+ * <ul> 로 넣으면 에디터가 글머리기호 문단으로 바꿔버린다. 기호가 본문 왼쪽 끝에
+ * 따로 떨어져 붙어서 보기 흉하다. 그냥 한 줄씩 문단으로 넣는다.
+ */
 function sourcesHtml(sources) {
-  const items = sources
+  const lines = sources
     .map((source) => (
-      `<li style="margin:0 0 5px 0; line-height:1.7; font-size:13.5px; ` +
-      `color:#5b6773; text-align:left;">${inline(source)}</li>`
+      `<p style="margin:0 0 5px 0; line-height:1.7; font-size:13.5px; `
+      + `color:#5b6773; text-align:left;">${inline(source)}</p>`
     ))
     .join('');
   return (
-    `<p style="margin:16px 0 6px 0; font-size:14px; font-weight:700; color:#5b6773; ` +
-    `text-align:left;">참고한 자료</p>` +
-    `<ul style="margin:0 0 18px 0; padding-left:20px; color:#5b6773;">${items}</ul>`
+    `<p style="margin:16px 0 6px 0; font-size:14px; font-weight:700; color:#5b6773; `
+    + `text-align:left;">참고한 자료</p>${lines}`
   );
 }
 
