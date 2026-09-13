@@ -247,6 +247,24 @@ export function buildBodyHtml(post) {
 }
 
 /**
+ * 어느 조각 다음에 이미지를 끼워 넣을지 정한다.
+ * 글 전체(조각 개수 기준) 의 1/5, 중간, 4/5 지점을 목표로 하되,
+ * 서로 겹치면 뒤쪽 지점을 한 칸씩 밀어 최대한 갈라놓는다.
+ */
+function pickInsertionPoints(total) {
+  const fractions = [0.2, 0.5, 0.8];
+  const points = [];
+  for (const fraction of fractions) {
+    const raw = Math.min(total - 1, Math.max(1, Math.round(fraction * total)));
+    const value = points.length && raw <= points[points.length - 1]
+      ? points[points.length - 1] + 1
+      : raw;
+    points.push(value < total ? value : null);
+  }
+  return points;
+}
+
+/**
  * 본문을 [글 조각 ↔ 강조 카드 이미지] 가 번갈아 오는 계획으로 만든다.
  * 카드는 글 구조에서 뽑아낸 문구를 담은 이미지 3장으로, 1/5·중간·4/5 지점에 들어간다.
  * (카드 자체는 src/content/highlights.js + thumbnail.js 의 renderContentImages 가 만든다)

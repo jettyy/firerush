@@ -9,7 +9,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "setup": "node scripts/setup.js",
-    "check": "node --check src/server.js"
+    "check": "node --check src/server.js",
+    "smoke": "node scripts/smoke.js"
   },
   "engines": {
     "node": ">=20"
