@@ -4,7 +4,10 @@ import { getContext, hasNaverCookies } from './browser.js';
 import { getSettings } from '../lib/settings.js';
 import { SHOT_DIR, ensureDirs } from '../lib/paths.js';
 import { logger } from '../lib/events.js';
-import { buildIntroHtml, buildBodyPlan, htmlToPlainText, BLOCK_GAP } from '../content/html.js';
+import {
+  buildIntroHtml, buildBodyPlan, buildTableChunks, htmlToPlainText, BLOCK_GAP,
+} from '../content/html.js';
+import { renderTableImages } from '../content/thumbnail.js';
 
 const MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -198,6 +201,58 @@ async function pasteHtml(page, scope, html) {
   return 'plain-text';
 }
 
+/**
+ * 표를 확실하게 넣는다. 앞 단계가 실패하면 다음 단계로 내려간다.
+ *
+ *   1단계  표 전체를 한 번에 붙여넣기        — 성공하면 글자를 선택할 수 있는 진짜 표
+ *   2단계  20행씩 끊어 여러 번 붙여넣기      — 조각이 작으면 에디터가 받아준다
+ *   3단계  표를 그림으로 그려 파일로 삽입     — 클립보드를 안 거치므로 거절당하지 않는다
+ *
+ * 1·2단계는 에디터 안의 table 개수를 직접 세어 확인한다.
+ * "글자가 늘었나" 만 보면 표가 통째로 잘려도 성공으로 치기 때문이다.
+ */
+async function insertTable(page, scope, step, jobId) {
+  const rows = step.table?.rows?.length || 0;
+
+  const pasted = async (html) => {
+    const before = await tableCount(scope);
+    await pasteHtml(page, scope, BLOCK_GAP + html);
+    await page.waitForTimeout(400);
+    return (await tableCount(scope)) > before;
+  };
+
+  if (await pasted(step.html)) {
+    logger.info(`표 입력 완료 (${rows}행, 한 번에)`, { jobId });
+    return true;
+  }
+
+  const chunks = buildTableChunks(step.table, 20);
+  if (chunks.length > 1) {
+    logger.warn(`표가 한 번에 안 들어가 ${chunks.length}조각으로 나눠 넣습니다.`, { jobId });
+    let done = 0;
+    for (const chunk of chunks) {
+      if (await pasted(chunk)) done += 1;
+      await page.waitForTimeout(200);
+    }
+    if (done === chunks.length) {
+      logger.info(`표 입력 완료 (${rows}행, ${chunks.length}조각으로 나눔)`, { jobId });
+      return true;
+    }
+    logger.warn(`나눠 넣기도 ${done}/${chunks.length}조각만 들어갔습니다. 그림으로 넣습니다.`, { jobId });
+  }
+
+  // 마지막 수단. 여기까지 오면 반드시 들어간다.
+  try {
+    const images = await renderTableImages(chunks.length ? chunks : [step.html], { jobId });
+    for (const image of images) await insertImage(page, scope, image.filePath);
+    logger.info(`표를 그림 ${images.length}장으로 넣었습니다 (${rows}행).`, { jobId });
+    return true;
+  } catch (error) {
+    logger.error(`표를 끝내 넣지 못했습니다 (${rows}행): ${error.message}`, { jobId });
+    return false;
+  }
+}
+
 /** 현재 커서 위치에 이미지를 넣는다. */
 async function insertImage(page, scope, imagePath) {
   const { locator } = await findFirst(scope, SELECTORS.imageButton, 10000);
@@ -323,23 +378,14 @@ export async function publishDraft({ post, thumbnailPath, contentImagePaths = []
         logger.info(`본문 강조 카드 이미지 삽입 (${imagesInserted}/3)`, { jobId });
         continue;
       }
-      const tablesBefore = step.hasTable ? await tableCount(scope) : 0;
-      lastMode = await pasteHtml(page, scope, BLOCK_GAP + step.html);
+      if (step.table) {
+        await insertTable(page, scope, step, jobId);
+        await page.waitForTimeout(250);
+        continue;
+      }
 
-      if (step.hasTable) {
-        const rows = (step.html.match(/<tr/g) || []).length;
-        if ((await tableCount(scope)) > tablesBefore) {
-          logger.info(`표 입력 완료 (${rows}행, ${lastMode})`, { jobId });
-        } else {
-          // 여기서 멈추지는 않는다. 표 하나 때문에 글 전체를 버리는 건 손해다.
-          // 대신 무엇이 빠졌는지 분명히 남겨서 사람이 손으로 채울 수 있게 한다.
-          logger.warn(
-            `표가 에디터에 들어가지 않았습니다 (${rows}행). 글은 그대로 저장하되, `
-            + `표는 data/posts 의 preview.html 에서 복사해 직접 넣으셔야 합니다.`,
-            { jobId },
-          );
-        }
-      } else if (plan.length > 3) {
+      lastMode = await pasteHtml(page, scope, BLOCK_GAP + step.html);
+      if (plan.length > 3) {
         logger.info(`본문 텍스트 조각 입력 (${lastMode})`, { jobId });
       }
       await page.waitForTimeout(250);

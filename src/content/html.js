@@ -128,6 +128,30 @@ export function buildTableHtml(table) {
   return parts.join('');
 }
 
+/**
+ * 표를 몇 행씩 끊어 여러 개의 작은 표로 만든다.
+ *
+ * 한 덩어리로 붙여넣다 실패했을 때 쓴다. 조각이 작으면 에디터가 받아준다.
+ * 조각마다 머리글을 다시 넣어 따로 떼어 봐도 읽히게 하고,
+ * 소제목은 첫 조각에만, 표 아래 안내문은 마지막 조각에만 붙인다.
+ */
+export function buildTableChunks(table, rowsPerChunk = 20) {
+  if (!table?.headers?.length || !table.rows?.length) return [];
+
+  const chunks = [];
+  for (let start = 0; start < table.rows.length; start += rowsPerChunk) {
+    const rows = table.rows.slice(start, start + rowsPerChunk);
+    const last = start + rowsPerChunk >= table.rows.length;
+    chunks.push(buildTableHtml({
+      heading: start === 0 ? table.heading : '',
+      headers: table.headers,
+      rows,
+      note: last ? table.note : '',
+    }));
+  }
+  return chunks;
+}
+
 /** 서두의 "선정 기준" 단락. */
 function criteriaHtml(criteria) {
   if (!criteria) return '';
@@ -174,81 +198,52 @@ export const BLOCK_GAP = SPACER;
  */
 function bodyPieces(post) {
   const pieces = [];
-  const tableHtml = buildTableHtml(post.table);
+  // 표 조각은 원본 table 을 같이 들고 다닌다.
+  // 붙여넣기가 실패하면 그 자료로 잘게 쪼개거나 그림으로 그려 넣어야 하기 때문이다.
+  const text = (html) => (html ? { html } : null);
+  const tablePiece = (table) => {
+    const html = buildTableHtml(table);
+    return html ? { html, table } : null;
+  };
 
   // 본론에 들어가기 전에 짚고 갈 전제. 글의 신뢰도를 만드는 자리라 앞에 둔다.
   if (post.disclaimer?.length) {
-    pieces.push(post.disclaimer.map(paragraph).join(SPACER));
+    pieces.push(text(post.disclaimer.map(paragraph).join(SPACER)));
   }
-  if (post.criteria) pieces.push(criteriaHtml(post.criteria));
+  if (post.criteria) pieces.push(text(criteriaHtml(post.criteria)));
 
+  const mainTable = tablePiece(post.table);
   post.sections.forEach((section, index) => {
-    if (index > 0) pieces.push(divider());
-    pieces.push(sectionHtml(section));
+    if (index > 0) pieces.push(text(divider()));
+    pieces.push(text(sectionHtml(section)));
     // 첫 섹션(배경 설명) 다음이 표가 들어가기 가장 자연스러운 자리다.
-    if (index === 0 && tableHtml) pieces.push(tableHtml);
+    if (index === 0 && mainTable) pieces.push(mainTable);
   });
-  if (tableHtml && !post.sections.length) pieces.push(tableHtml);
+  if (mainTable && !post.sections.length) pieces.push(mainTable);
 
   // "이것까지 같이 보세요" 표는 마무리 직전이 제자리다.
   // 소제목은 buildTableHtml 이 table.heading 으로 이미 그린다. 여기서 또 넣으면 두 번 나온다.
-  const checklistHtml = buildTableHtml(post.checklist);
-  if (checklistHtml) {
-    pieces.push(divider());
-    pieces.push(checklistHtml);
+  const checklist = tablePiece(post.checklist);
+  if (checklist) {
+    pieces.push(text(divider()));
+    pieces.push(checklist);
   }
 
   if (post.outro.length) {
-    pieces.push(divider());
-    pieces.push(post.outro.map(paragraph).join(SPACER));
+    pieces.push(text(divider()));
+    pieces.push(text(post.outro.map(paragraph).join(SPACER)));
   }
-  if (post.footnote) pieces.push(footnote(post.footnote));
-  if (post.sources?.length) pieces.push(sourcesHtml(post.sources));
+  if (post.footnote) pieces.push(text(footnote(post.footnote)));
+  if (post.sources?.length) pieces.push(text(sourcesHtml(post.sources)));
   if (post.tags.length) {
-    pieces.push(paragraph(post.tags.map((tag) => `#${tag}`).join(' ')));
+    pieces.push(text(paragraph(post.tags.map((tag) => `#${tag}`).join(' '))));
   }
   return pieces.filter(Boolean);
 }
 
 /** 썸네일 뒤에 들어갈 본문 전체 (미리보기·백업용, 이미지 없이 순수 텍스트). */
 export function buildBodyHtml(post) {
-  return bodyPieces(post).join(SPACER);
-}
-
-/**
- * 본문을 붙여넣기 단위로 쪼갠 배열. (이미지 없는 글, 또는 표만 있는 글용 — 옛 방식)
- * 표가 있으면 [표 앞] · [표] · [표 뒤] 세 덩어리로, 없으면 통째로 한 번에 붙인다.
- * buildBodyPlan 을 쓰지 않는 호출부(있다면)를 위해 남겨둔다.
- */
-export function buildBodyBlocks(post) {
-  const pieces = bodyPieces(post);
-  const tableHtml = buildTableHtml(post.table);
-  const tableIndex = tableHtml ? pieces.indexOf(tableHtml) : -1;
-
-  if (tableIndex === -1) return [pieces.join(SPACER)].filter(Boolean);
-  return [
-    pieces.slice(0, tableIndex).join(SPACER),
-    pieces[tableIndex],
-    pieces.slice(tableIndex + 1).join(SPACER),
-  ].filter(Boolean);
-}
-
-/**
- * 어느 조각 다음에 이미지를 끼워 넣을지 정한다.
- * 글 전체(조각 개수 기준) 의 1/5, 중간, 4/5 지점을 목표로 하되,
- * 서로 겹치면 뒤쪽 지점을 한 칸씩 밀어 최대한 갈라놓는다.
- */
-function pickInsertionPoints(total) {
-  const fractions = [0.2, 0.5, 0.8];
-  const points = [];
-  for (const fraction of fractions) {
-    const raw = Math.min(total - 1, Math.max(1, Math.round(fraction * total)));
-    const value = points.length && raw <= points[points.length - 1]
-      ? points[points.length - 1] + 1
-      : raw;
-    points.push(value < total ? value : null);
-  }
-  return points;
+  return bodyPieces(post).map((piece) => piece.html).join(SPACER);
 }
 
 /**
@@ -298,12 +293,12 @@ function pushHtmlSteps(plan, segment) {
   };
 
   for (const piece of segment) {
-    if (piece.includes('<table')) {
+    if (piece.table) {
       flush();
-      plan.push({ type: 'html', html: piece, hasTable: true });
+      plan.push({ type: 'html', html: piece.html, table: piece.table });
       continue;
     }
-    buffer.push(piece);
+    buffer.push(piece.html);
   }
   flush();
 }

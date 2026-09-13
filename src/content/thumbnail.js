@@ -130,6 +130,48 @@ export async function renderContentImages(post, { jobId = '' } = {}) {
   return results;
 }
 
+/**
+ * 표 HTML 을 그대로 그려 PNG 로 만든다.
+ *
+ * 붙여넣기가 끝내 안 될 때 쓰는 마지막 수단이다. 이미지 삽입은 파일 업로드라
+ * 클립보드를 거치지 않으므로 에디터가 거절할 일이 없다.
+ * 글자를 선택할 수 없게 되는 손해는 있지만, 표가 통째로 빠지는 것보다는 낫다.
+ *
+ * @returns {Promise<Array<{filePath: string, fileName: string}>>}
+ */
+export async function renderTableImages(chunksHtml, { jobId = '' } = {}) {
+  ensureDirs();
+  const width = 900;
+  const images = [];
+
+  for (let index = 0; index < chunksHtml.length; index += 1) {
+    const html = `<body style="margin:0; padding:24px; background:#fff;">${chunksHtml[index]}</body>`;
+    const fileName = `${Date.now()}-${jobId || 'table'}-t${index + 1}.png`;
+    const filePath = path.join(THUMB_DIR, fileName);
+
+    const browser = await getRenderBrowser();
+    const context = await browser.newContext({
+      viewport: { width, height: 800 },
+      deviceScaleFactor: 2,
+      locale: 'ko-KR',
+    });
+    const page = await context.newPage();
+    try {
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => document.fonts?.ready).catch(() => {});
+      await page.waitForTimeout(250);
+      // 표 높이가 얼마든 잘리지 않게 페이지 전체를 찍는다.
+      await page.screenshot({ path: filePath, type: 'png', fullPage: true });
+      images.push({ filePath, fileName });
+    } finally {
+      await context.close().catch(() => {});
+    }
+  }
+
+  logger.info(`표를 그림 ${images.length}장으로 만들었습니다.`, { jobId });
+  return images;
+}
+
 /** 대시보드 미리보기용 — 저장하지 않고 HTML만 돌려준다. */
 export function previewThumbnailHtml(spec) {
   const settings = getSettings();
