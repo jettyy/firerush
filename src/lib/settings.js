@@ -46,6 +46,17 @@ export const DEFAULT_SETTINGS = {
     blockOnFail: false,          // 끝내 못 고치면 저장하지 않고 실패로 둘지
   },
 
+  // 상단 썸네일의 "배경 그림"만 이미지 생성 API로 받아온다.
+  // 한글 문구는 HTML 템플릿이 그 위에 얹는다 — 이미지 모델이 한글을 깨뜨리기 때문이다.
+  // 본문 강조 카드 3장은 여기를 쓰지 않는다. 돈이 드는 건 글 한 편당 딱 한 장.
+  image: {
+    enabled: false,              // API 키를 넣고 켜야 동작한다. 꺼져 있으면 지금까지와 똑같다.
+    provider: 'google',
+    model: 'imagen-4.0-fast-generate-001',   // 가장 저렴한 등급
+    apiKey: '',                  // 이 파일은 .gitignore 대상이라 저장소에 올라가지 않는다.
+    timeoutMs: 60000,
+  },
+
   // 썸네일 (글 최상단) + 본문 강조 카드 (1/5·중간·4/5 지점)
   thumbnail: {
     width: 1200,

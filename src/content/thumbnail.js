@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { renderTemplate, renderContentCard } from './templates/index.js';
 import { buildHighlightCards } from './highlights.js';
+import { generateBackground } from './imagegen.js';
 import { getRenderBrowser } from '../lib/playwright.js';
 import { getSettings } from '../lib/settings.js';
 import { THUMB_DIR, ensureDirs } from '../lib/paths.js';
@@ -39,20 +40,23 @@ async function renderHtmlToPng(html, { width, height, filePath }) {
  * AI 가 설계한 문구/색상을 HTML 템플릿에 얹고 스크린샷으로 PNG를 만든다.
  * 이미지 생성 API를 쓰지 않으므로 추가 비용이 없다.
  */
-export async function renderThumbnail(post, { jobId = '' } = {}) {
+export async function renderThumbnail(post, { jobId = '', signal } = {}) {
   ensureDirs();
   const settings = getSettings();
   const { width, height } = settings.thumbnail;
 
-  const spec = { ...post.thumbnail, width, height };
+  // 배경 그림만 이미지 API로 받아온다. 실패하면 null 이 와서 기존 방식으로 만든다.
+  const background = await generateBackground(post, { jobId, signal });
+  const spec = { ...post.thumbnail, width, height, background };
   const html = renderTemplate(spec);
 
   const fileName = `${Date.now()}-${jobId || slugify(post.title, 24)}.png`;
   const filePath = path.join(THUMB_DIR, fileName);
   const size = await renderHtmlToPng(html, { width, height, filePath });
 
-  logger.info(`썸네일 생성 완료 (${spec.style}, ${Math.round(size / 1024)}KB)`, { jobId });
-  return { filePath, fileName, style: spec.style };
+  const how = background ? '배경 그림 + 한글 얹기' : spec.style;
+  logger.info(`썸네일 생성 완료 (${how}, ${Math.round(size / 1024)}KB)`, { jobId });
+  return { filePath, fileName, style: background ? 'illust' : spec.style };
 }
 
 /**

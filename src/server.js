@@ -6,6 +6,7 @@ import { listJobs, addTopics, removeJob, clearJobs, resetJob, stats, STATUS } fr
 import { parseTopics } from './lib/util.js';
 import { openLoginWindow, verifySession, readSessionInfo, logout, closeContext } from './naver/browser.js';
 import { previewThumbnailHtml } from './content/thumbnail.js';
+import { testImageApi } from './content/imagegen.js';
 import { checkClaude, runClaude } from './ai/claude.js';
 import { MODELS } from './ai/models.js';
 import { listExamples, addExample, removeExample, setExampleEnabled, MAX_EXAMPLE_CHARS } from './content/examples.js';
@@ -154,6 +155,21 @@ app.post('/api/ai/test', wrap(async (req, res) => {
     logger.error(`AI 연결 테스트 실패: ${error.message}`);
     res.json({ ok: true, failed: true, message: error.message, dumpFile: error.dumpFile || '' });
   }
+}));
+
+app.post('/api/image/test', wrap(async (req, res) => {
+  logger.step('이미지 생성 API 테스트 시작');
+  const result = await testImageApi();
+  if (result.ok) logger.info(`이미지 API 테스트 성공 — ${result.message}`);
+  else logger.error(`이미지 API 테스트 실패: ${result.message}`);
+  // ok:false 로 보내면 프런트가 예외로 던져버린다.
+  // 요청 자체는 성공했으므로 ok 는 true 로 두고, 테스트 결과는 success 로 따로 보낸다.
+  res.json({
+    ok: true,
+    success: result.ok,
+    message: result.message,
+    preview: result.preview || '',
+  });
 }));
 
 /* ---------- 참고 예시 ---------- */

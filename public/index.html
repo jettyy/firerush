@@ -144,6 +144,19 @@
         <label>썸네일 세로(px)<input id="s-thumb-h" type="number" min="400" max="2000" step="10"></label>
         <label class="check"><input id="s-content-cards" type="checkbox"> 본문 중간에 강조 카드 이미지 3장 넣기 (1/5·중간·4/5 지점)</label>
 
+        <label class="wide check"><input id="s-image-on" type="checkbox"> 상단 썸네일 배경을 이미지 생성 AI로 그리기 (글 1편당 1장, 유료)</label>
+        <label>이미지 모델
+          <select id="s-image-model">
+            <option value="imagen-4.0-fast-generate-001">imagen-4.0-fast · 가장 저렴</option>
+            <option value="imagen-4.0-generate-001">imagen-4.0 · 품질 우선</option>
+            <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+          </select>
+        </label>
+        <label>구글 API 키
+          <input id="s-image-key" type="password" placeholder="aistudio.google.com 에서 발급" autocomplete="off">
+          <span class="sub">이 컴퓨터의 data/settings.json 에만 저장됩니다</span>
+        </label>
+
         <label class="check"><input id="s-enforce" type="checkbox"> 품질 검사 통과할 때까지 자동으로 고쳐 쓰기</label>
         <label>보정 재시도 횟수<input id="s-repairs" type="number" min="0" max="3"><span class="sub">늘릴수록 호출이 늘어 느려집니다 (권장 1)</span></label>
         <label class="check"><input id="s-block" type="checkbox"> 끝내 통과 못 하면 저장하지 않고 실패 처리</label>
@@ -156,8 +169,15 @@
       <div class="row">
         <button class="btn primary" id="btn-save-settings">설정 저장</button>
         <button class="btn" id="btn-test-ai">선택한 모델로 연결 테스트</button>
+        <button class="btn" id="btn-test-image">이미지 API 테스트</button>
         <button class="btn" id="btn-preview-thumb">썸네일 미리보기</button>
       </div>
+      <p class="note">이미지 생성은 <b>상단 썸네일의 배경 그림 한 장</b>에만 씁니다.
+        한글 문구는 프로그램이 그 위에 얹으므로 글자가 깨지지 않고,
+        본문 강조 카드 3장은 지금처럼 공짜로 만듭니다.
+        키를 저장한 뒤 <b>이미지 API 테스트</b>를 눌러 한 장 뽑아보세요.</p>
+      <img id="image-test-preview" class="hidden" alt="이미지 테스트 결과"
+           style="width:100%; max-width:420px; margin-top:12px; border-radius:10px; border:1px solid var(--line);">
       <p class="note">주제를 100개 돌리기 전에 <b>연결 테스트</b>를 한 번 눌러보세요.
         모델을 쓸 수 없거나 로그인이 풀렸으면 여기서 바로 드러납니다.</p>
       <p class="note">품질 검사는 분량·종결어미·구어체 비율·금지 표현·번역투 접속사·문단 길이·

@@ -159,7 +159,60 @@ function editorial({ headline, subline, badge, emoji, accent, width, height }) {
 
 export const TEMPLATES = { bold, gradient, minimal, editorial };
 
+/**
+ * 이미지 생성 API로 받은 배경 그림 위에 한글 문구를 얹는 썸네일.
+ *
+ * 그림에는 글자가 하나도 없다(그렇게 주문했다). 한글은 전부 여기서 브라우저가 그린다.
+ * 이미지 모델이 한글을 뭉개는 문제를 원천적으로 피하려는 구조다.
+ *
+ * 그림이 밝든 어둡든 글자가 읽혀야 하므로, 글자가 올라가는 자리에는
+ * 반드시 어두운 그라데이션을 깐다.
+ */
+function illust({ headline, subline, badge, accent, width, height, background }) {
+  const dark = shade(accent, -45);
+  const barSpace = subline ? height * 0.2 : 0;
+
+  return shell(width, height, `
+  <div class="card" style="background:${accent}; flex-direction:column; justify-content:flex-end;">
+    <img src="${background}" alt=""
+         style="position:absolute; inset:0; width:${width}px; height:${height}px;
+                object-fit:cover;">
+    <div style="position:absolute; inset:0;
+                background:linear-gradient(to bottom,
+                  rgba(0,0,0,.45) 0%, rgba(0,0,0,.10) 32%,
+                  rgba(0,0,0,.55) 62%, rgba(0,0,0,.86) 100%);"></div>
+
+    ${badge ? `
+    <div style="position:absolute; left:${height * 0.08}px; top:${height * 0.08}px;">
+      <span class="badge" style="background:${accent}; color:#fff;
+            box-shadow:0 ${height * 0.008}px ${height * 0.03}px rgba(0,0,0,.35);">
+        ${escapeHtml(badge)}
+      </span>
+    </div>` : ''}
+
+    <div style="position:relative; z-index:2;
+                padding:0 ${height * 0.09}px ${height * 0.08 + barSpace}px;">
+      <div class="headline" style="font-size:${height * 0.125}px; line-height:1.18; color:#fff;
+           text-shadow:0 ${height * 0.006}px ${height * 0.035}px rgba(0,0,0,.75);">
+        ${escapeHtml(headline)}
+      </div>
+    </div>
+
+    ${bottomBar({
+    text: subline,
+    height,
+    width,
+    bg: 'rgba(255,255,255,.94)',
+    color: dark,
+    accentDark: accent,
+  })}
+  </div>`);
+}
+
 export function renderTemplate(spec) {
+  // 배경 그림을 받아왔으면 그림 전용 배치를 쓴다.
+  // 기존 4종은 배경이 없다는 전제로 여백을 잡아둬서 그림을 깔면 글자가 묻힌다.
+  if (spec.background) return illust(spec);
   const build = TEMPLATES[spec.style] || TEMPLATES.bold;
   return build(spec);
 }

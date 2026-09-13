@@ -82,7 +82,10 @@ const THUMBNAIL_BLOCK = `[썸네일 문구]
 - headline: 18자 이내 / subline: 30자 이내 / badge: 6자 이내
 - style: bold, gradient, minimal, editorial 중 하나
 - accent: 어두운 계열 HEX (흰 글씨가 올라갑니다)
-- 썸네일 문구에도 특수문자와 이모지를 쓰지 마세요.`;
+- 썸네일 문구에도 특수문자와 이모지를 쓰지 마세요.
+- scene: 썸네일 배경에 그릴 그림을 영어 한 줄로 묘사하세요. 글자는 그리지 않습니다.
+  주제를 한눈에 알아볼 수 있는 사물이나 장면으로 쓰세요.
+  (예: "a city skyline with university buildings and students holding books")`;
 
 function metaBlock() {
   return `[태그]
@@ -130,7 +133,7 @@ function jsonShape({ withItems, withCriteria, withTableRows }) {
   "summary": "한 줄 요약입니다.",
   "tags": ["태그1","태그2","태그3","태그4","태그5","태그6","태그7","태그8"],
   "guidelineCheck": "사용자 지침을 어떻게 반영했는지 한 줄 (지침 없으면 \\"\\")",
-  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"minimal","accent":"#1F3A93"},
+  "thumbnail": {"headline":"...","subline":"...","badge":"...","style":"minimal","accent":"#1F3A93","scene":"English one-line description of the background artwork, no text in it"},
   "intro": ["도입 문단1", "도입 문단2", "도입 문단3"],
   "disclaimer": ["본론 전에 짚고 갈 오해나 전제를 적는 문단입니다.", "왜 그런지 설명하는 문단입니다."],${criteria}${table}
   "sections": [
@@ -414,6 +417,7 @@ export function normalize(raw, topic, settings, shape = 'general') {
       headline: plain(thumb.headline || title).slice(0, 40),
       subline: plain(thumb.subline || raw.summary || '').slice(0, 60),
       badge: plain(thumb.badge || '').slice(0, 12),
+      scene: plain(thumb.scene || '').slice(0, 300),
       emoji: String(thumb.emoji || '').trim().slice(0, 4),
       style,
       accent,

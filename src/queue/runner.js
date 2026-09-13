@@ -116,7 +116,7 @@ async function processJob(job) {
   }
 
   updateJob(job.id, { status: STATUS.THUMBNAIL, message: '썸네일 만드는 중...' });
-  const thumb = await renderThumbnail(post, { jobId: job.id });
+  const thumb = await renderThumbnail(post, { jobId: job.id, signal: state.abort?.signal });
   updateJob(job.id, { thumbnailPath: thumb.fileName, message: `썸네일 완성 (${thumb.style})` });
 
   let contentImages = [];

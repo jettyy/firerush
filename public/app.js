@@ -228,6 +228,10 @@ function renderSettings() {
   $('s-thumb-w').value = s.thumbnail.width;
   $('s-thumb-h').value = s.thumbnail.height;
   $('s-content-cards').checked = Boolean(s.thumbnail.contentCards);
+  const image = s.image || {};
+  $('s-image-on').checked = Boolean(image.enabled);
+  $('s-image-model').value = image.model || 'imagen-4.0-fast-generate-001';
+  if (document.activeElement !== $('s-image-key')) $('s-image-key').value = image.apiKey || '';
   $('s-enforce').checked = Boolean(s.quality.enforce);
   $('s-repairs').value = s.quality.maxRepairs;
   $('s-block').checked = Boolean(s.quality.blockOnFail);
@@ -323,6 +327,11 @@ function collectSettings() {
       audience: $('s-audience').value,
       extraGuideline: $('s-guideline').value,
       addCriteria: $('s-criteria').checked,
+    },
+    image: {
+      enabled: $('s-image-on').checked,
+      model: $('s-image-model').value,
+      apiKey: $('s-image-key').value.trim(),
     },
     thumbnail: {
       style: $('s-thumb-style').value,
@@ -443,6 +452,32 @@ $('s-model-custom').addEventListener('change', async () => {
   await patchSettings({ claude: { model: $('s-model-custom').value.trim() } });
   toast('모델을 저장했습니다.');
 });
+
+$('btn-test-image').onclick = async () => {
+  const button = $('btn-test-image');
+  const box = $('ai-test-result');
+  const preview = $('image-test-preview');
+  button.disabled = true;
+  box.className = 'test-result';
+  box.textContent = '이미지를 한 장 생성해 보는 중... (10~30초)';
+  preview.classList.add('hidden');
+  try {
+    // 화면에 입력한 키로 바로 테스트할 수 있게 먼저 저장한다.
+    await patchSettings(collectSettings());
+    const result = await api('/api/image/test', { method: 'POST' });
+    box.className = `test-result ${result.success ? 'good' : 'bad'}`;
+    box.textContent = result.message;
+    if (result.preview) {
+      preview.src = result.preview;
+      preview.classList.remove('hidden');
+    }
+  } catch (error) {
+    box.className = 'test-result bad';
+    box.textContent = `테스트 실패: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+};
 
 $('btn-save-settings').onclick = async () => {
   await patchSettings(collectSettings());
