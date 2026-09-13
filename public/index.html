@@ -54,7 +54,9 @@
       <button class="btn ghost" id="btn-clear-text">입력 지우기</button>
     </div>
     <p class="note">주제에 <b>TOP100</b>, <b>50가지</b>, <b>베스트 30</b> 처럼 개수가 들어 있으면
-      자동으로 순위표 글로 인식해서 <b>항목 전부를 표로</b> 만듭니다. (구간을 나눠 생성하므로 시간이 더 걸립니다)</p>
+      그 개수만큼 표를 채웁니다. 개수 없이 <b>"~~~ 순위"</b> 라고만 써도 30개를 목표로 최대한 많이 채웁니다.
+      자료가 모자라면 확인되는 데까지만 넣고, 빈 행을 지어내지는 않습니다.
+      (구간을 나눠 생성하므로 시간이 더 걸립니다)</p>
   </section>
 
   <section class="card" id="card-guide">
@@ -110,12 +112,24 @@
           <input id="s-model-custom" type="text" placeholder="예: claude-opus-4-6">
         </label>
 
-        <label>말투<input id="s-tone" type="text"></label>
+        <label class="wide check"><input id="s-persona" type="checkbox"> 정해진 화자(페르소나)로 1인칭 경험담처럼 쓰기</label>
+        <label>블로그 닉네임<input id="s-nickname" type="text" placeholder="예: 두배파파"></label>
+        <label>화자가 누구인지<input id="s-identity" type="text" placeholder="예: 30대 후반 직장인이자 쌍둥이 아빠"></label>
+        <label class="wide">화자의 생활<textarea id="s-life" rows="2" spellcheck="false"></textarea><span class="sub">글의 배경으로 깔릴 일상입니다. 퇴근, 육아, 주말처럼 반복되는 상황을 적으세요.</span></label>
+        <label class="wide">절대 쓰지 않을 소재<textarea id="s-banned" rows="2" spellcheck="false"></textarea><span class="sub">여기 적은 소재는 프롬프트에서 금지되고, 글에 나오면 품질 검사에서 걸러집니다.</span></label>
+
+        <label>말투 검사 기준
+          <select id="s-voice">
+            <option value="monologue">독백체 · ~했네요 / ~더라고요</option>
+            <option value="formal">존댓말 · ~습니다 / ~입니다</option>
+            <option value="casual">해요체 · ~해요 / ~예요</option>
+          </select>
+        </label>
+        <label>어조 설명<input id="s-tone" type="text"><span class="sub">프롬프트에 그대로 들어갑니다</span></label>
         <label>목표 분량(공백 제외, 자)<input id="s-chars" type="number" min="500" max="4000" step="100"><span class="sub">품질 검사의 최소 분량 기준입니다 (권장 1500~2000)</span></label>
         <label>소제목 개수<input id="s-sections" type="number" min="2" max="6"><span class="sub">권장 3~4개</span></label>
         <label>독자<input id="s-audience" type="text"></label>
-        <label class="check"><input id="s-formal" type="checkbox"> ~습니다체로 검사 (끄면 ~해요체)</label>
-        <label class="check"><input id="s-criteria" type="checkbox"> 서두에 "선정 기준" 단락 넣기</label>
+        <label class="check"><input id="s-criteria" type="checkbox"> 순위·비교 글 서두에 "고른 기준" 넣기</label>
 
         <label>썸네일 스타일
           <select id="s-thumb-style">
@@ -146,8 +160,9 @@
       </div>
       <p class="note">주제를 100개 돌리기 전에 <b>연결 테스트</b>를 한 번 눌러보세요.
         모델을 쓸 수 없거나 로그인이 풀렸으면 여기서 바로 드러납니다.</p>
-      <p class="note">품질 검사는 분량·종결어미·소제목 구조·선정 기준·비교표·불렛 포인트·
-        인사말 금지·기호/이모지 금지·마무리를 자동으로 확인하고, 걸린 항목만 짚어 다시 쓰게 합니다.</p>
+      <p class="note">품질 검사는 분량·종결어미·구어체 비율·금지 표현·번역투 접속사·문단 길이·
+        구체적인 숫자·솔직한 아쉬움·생활 맥락·소제목 구조·비교표·불렛 포인트·인사말 금지·
+        기호와 이모지 금지·마무리를 자동으로 확인하고, 걸린 항목만 짚어 다시 쓰게 합니다.</p>
       <div id="ai-test-result" class="test-result hidden"></div>
       <iframe id="thumb-preview" class="thumb-preview hidden" title="썸네일 미리보기"></iframe>
     </div>

@@ -8,7 +8,13 @@
  * "규칙은 넣었는데 안 지켜진 글" 이 그대로 저장되기 때문이다.
  *
  * 검사에서 걸린 항목은 generator 가 그 항목만 짚어 한 번 더 고쳐 쓰게 한다.
+ *
+ * 말투·페르소나·금지 표현은 persona.js 에 있다. 그쪽 정의를 그대로 가져다 검사한다.
  */
+
+import {
+  BANNED_PHRASES, LIFE_WORDS, findConnectors, getVoice, hasMonologueMark,
+} from './persona.js';
 
 /* ------------------------------------------------------------------ */
 /* 본문에서 글자 뽑아내기                                                */
@@ -88,17 +94,6 @@ const EMOJI = /\p{Extended_Pictographic}/u;
 const GREETING = /^(안녕하세요|반갑습니다|여러분|오늘은|이번\s*(포스팅|글|시간)|금일|본\s*포스팅|이\s*글에서는|지난\s*시간에)/;
 const META_SENTENCE = /(알아보(겠습니다|도록 하겠습니다)|살펴보(겠습니다|도록 하겠습니다)|정리해\s*보(겠습니다|았습니다)|준비했습니다)\s*[.!]?\s*$/;
 
-/**
- * 규칙이 요구하는 '하십시오체' 종결어미.
- *
- * "습니다 / 입니다" 만 찾으면 "바랍니다", "드립니다", "만듭니다" 처럼
- * 모음으로 끝나는 어간에 -ㅂ니다 가 붙은 정상적인 문장을 전부 위반으로 잡는다.
- * 그래서 받침 형태를 따지지 않고 '니다 / 니까 / 십시오' 로 끝나는지만 본다.
- */
-const FORMAL_ENDING = /(니다|니까|십시오)\s*[.!?"'」』)\]]*$/;
-// "~해요체" 를 쓸 때는 이쪽으로 끝나는지 본다.
-const CASUAL_ENDING = /(요|에요|예요|해요|이에요)\s*[.!?"'」』)\]]*$/;
-
 // "~함 / ~임 / ~됨" 개조식(메모식). 어느 말투에서도 금지한다.
 const MEMO_TAIL = /([가-힣]{2,12})(함|됨|임)\s*[.!]?$/;
 // 문장 끝에 올 수 있는 평범한 명사들. 개조식으로 오해하지 않게 빼둔다.
@@ -141,21 +136,14 @@ export const RULES = [
   {
     id: 'ending',
     label: '종결어미',
-    prompt: (s) => (s.post.formalEnding
-      ? '모든 문장을 "~습니다", "~입니다" 형태의 완전한 종결어미로 끝낼 것. '
-        + '"~함", "~임", "~음" 같은 개조식·메모식 표현은 목록 항목에서도 절대 쓰지 마세요.'
-      : '모든 문장을 "~해요", "~예요" 형태로 자연스럽게 끝낼 것. '
-        + '"~함", "~임", "~음" 같은 개조식·메모식 표현은 목록 항목에서도 절대 쓰지 마세요.'),
+    prompt: (s) => `모든 문장을 ${getVoice(s).endingLabel} 처럼 완전한 종결어미로 끝낼 것. `
+      + '"~함", "~임", "~음" 같은 개조식·메모식 표현은 목록 항목에서도 절대 쓰지 마세요.',
     check: (post, settings) => {
-      const endingPattern = settings.post.formalEnding ? FORMAL_ENDING : CASUAL_ENDING;
-      const label = settings.post.formalEnding ? '"~습니다/~입니다"' : '"~해요/~예요"';
+      const voice = getVoice(settings);
       const sentences = splitSentences(sentenceSources(post));
       if (!sentences.length) return { ok: false, detail: '검사할 문장이 없습니다.' };
 
-      const memo = sentences.filter((s) => looksMemoStyle(s, endingPattern));
-      const formal = sentences.filter((s) => endingPattern.test(s));
-      const ratio = formal.length / sentences.length;
-
+      const memo = sentences.filter((s) => looksMemoStyle(s, voice.ending));
       if (memo.length) {
         return {
           ok: false,
@@ -163,11 +151,154 @@ export const RULES = [
             + memo.slice(0, 3).map((s) => `"${s.slice(0, 40)}"`).join(', '),
         };
       }
+
+      const closed = sentences.filter((s) => voice.ending.test(s));
+      const ratio = closed.length / sentences.length;
       return {
         ok: ratio >= 0.85,
-        detail: `${label} 종결 ${Math.round(ratio * 100)}% (기준 85%)`
-          + (ratio >= 0.85 ? '' : ` — 고쳐야 할 문장: ${sentences.filter((s) => !endingPattern.test(s))
+        detail: `${voice.endingLabel} 종결 ${Math.round(ratio * 100)}% (기준 85%)`
+          + (ratio >= 0.85 ? '' : ` — 고쳐야 할 문장: ${sentences.filter((s) => !voice.ending.test(s))
             .slice(0, 3).map((s) => `"${s.slice(0, 40)}"`).join(', ')}`),
+      };
+    },
+  },
+  {
+    id: 'voice',
+    label: '사람 말투',
+    prompt: () => '"~했네요", "~더라고요", "~인 것 같습니다" 같은 구어체 어미를 글 전체에 고르게 섞을 것. '
+      + '보고서처럼 딱딱하게만 끝나면 AI가 쓴 글로 읽힙니다.',
+    enabledWhen: (settings) => getVoice(settings).markerRatio > 0,
+    check: (post, settings) => {
+      const need = getVoice(settings).markerRatio;
+      const sentences = splitSentences(sentenceSources(post));
+      if (!sentences.length) return { ok: false, detail: '검사할 문장이 없습니다.' };
+      const marked = sentences.filter(hasMonologueMark).length;
+      const ratio = marked / sentences.length;
+      return {
+        ok: ratio >= need,
+        detail: ratio >= need
+          ? `구어체 어미 ${Math.round(ratio * 100)}%`
+          : `구어체 어미가 ${Math.round(ratio * 100)}%뿐입니다 (기준 ${Math.round(need * 100)}%). `
+            + '문장 끝을 "~네요", "~더라고요", "~거든요", "~인 것 같습니다" 로 바꿔 더 섞으세요.',
+      };
+    },
+  },
+  {
+    id: 'banned',
+    label: '금지 표현',
+    prompt: (s) => (s.persona?.enabled
+      ? `다음을 절대 쓰지 말 것: ${BANNED_PHRASES.map((p) => p.label).join(', ')}.`
+      : '"[사진 넣을 자리]" 같은 이미지 위치 표시를 쓰지 말 것.'),
+    check: (post, settings) => {
+      const text = allText(post);
+      const active = settings.persona?.enabled
+        ? BANNED_PHRASES
+        : BANNED_PHRASES.filter((phrase) => phrase.id === 'photoSlot' || phrase.id === 'cliche');
+      // 주제 자체가 그 단어를 담고 있으면(예: "음주운전 벌금") 빼고 본다.
+      // 사용자가 고른 주제까지 금지어로 막으면 영영 통과할 수 없는 글이 된다.
+      const topic = String(post.topic || '');
+      const hits = active.filter(
+        (phrase) => phrase.test.test(text) && !phrase.test.test(topic),
+      );
+      return {
+        ok: hits.length === 0,
+        detail: hits.length === 0
+          ? '금지 표현 없음'
+          : hits.map((phrase) => `${phrase.label} — ${phrase.fix}`).join(' / '),
+      };
+    },
+  },
+  {
+    id: 'connectors',
+    label: '번역투 접속사',
+    prompt: () => '"결론적으로", "무엇보다도", "한편", "게다가", "요컨대" 같은 기계적인 접속사를 쓰지 말 것. '
+      + '문장을 짧게 끊고 다음 문장으로 바로 넘어가세요.',
+    check: (post) => {
+      const found = findConnectors(sentenceSources(post).join('\n'));
+      return {
+        ok: found.length === 0,
+        detail: found.length === 0
+          ? '번역투 접속사 없음'
+          : `지워야 할 접속사: ${found.join(', ')} — 접속사를 빼고 문장을 바로 이으세요.`,
+      };
+    },
+  },
+  {
+    id: 'paragraph',
+    label: '문단 길이',
+    prompt: () => '문단 하나는 2~3문장까지만. 스마트폰에서 읽기 때문에 한 덩어리가 길면 바로 이탈합니다. '
+      + '문단을 짧게 끊어 여러 개로 나누세요.',
+    check: (post) => {
+      const paragraphs = [];
+      const push = (list) => (list || []).forEach((text) => paragraphs.push(String(text)));
+      push(post.intro);
+      if (post.criteria) push(post.criteria.paragraphs);
+      for (const section of post.sections || []) {
+        push(section.paragraphs);
+        for (const sub of section.subsections || []) push(sub.paragraphs);
+      }
+      push(post.outro);
+      if (!paragraphs.length) return { ok: false, detail: '문단이 없습니다.' };
+
+      const long = paragraphs.filter((text) => text.replace(/\s+/g, '').length > 240);
+      return {
+        ok: long.length === 0,
+        detail: long.length === 0
+          ? `문단 ${paragraphs.length}개 모두 적당한 길이`
+          : `너무 긴 문단이 ${long.length}개 있습니다: `
+            + long.slice(0, 2).map((text) => `"${text.slice(0, 30)}..."`).join(', ')
+            + ' — 2~3문장씩 끊어 여러 문단으로 나누세요.',
+      };
+    },
+  },
+  {
+    id: 'specifics',
+    label: '구체적인 숫자',
+    prompt: () => '"비쌌다", "오래 걸렸다" 같은 뭉뚱그린 표현 대신 가격·시간·개수·크기를 숫자로 적을 것. '
+      + '일반 명사 대신 구체적인 제품명과 지명을 쓰세요.',
+    check: (post) => {
+      // 자릿수가 아니라 "숫자로 짚은 대목이 몇 군데냐" 를 센다.
+      // "6개월" 과 "2만 5천 원" 은 자릿수는 다르지만 둘 다 구체적인 한 군데다.
+      const spots = (sentenceSources(post).join(' ').match(/\d+/g) || []).length;
+      return {
+        ok: spots >= 5,
+        detail: spots >= 5
+          ? `숫자로 짚은 대목 ${spots}군데`
+          : `숫자로 짚은 대목이 ${spots}군데뿐입니다 (5군데 이상 필요). `
+            + '가격, 걸린 시간, 개수, 크기를 구체적인 숫자로 바꿔 적으세요.',
+      };
+    },
+  },
+  {
+    id: 'honest',
+    label: '솔직한 아쉬움',
+    prompt: () => '장점만 나열하지 말고 아쉬운 점, 주의할 점, 내가 했던 실수를 최소 한 군데 솔직하게 적을 것. '
+      + '이게 사람이 쓴 글이라는 가장 강한 증거입니다.',
+    check: (post) => {
+      const text = sentenceSources(post).join(' ');
+      const found = text.match(/(아쉽|아쉬운|아쉬웠|단점|불편|실망|부담|걸리는 점|주의할|한계|막상|기대(가|보다))/g) || [];
+      return {
+        ok: found.length >= 1,
+        detail: found.length >= 1
+          ? '아쉬운 점을 솔직하게 짚었습니다'
+          : '좋은 말만 있습니다. 아쉬웠던 점이나 주의할 점을 최소 한 문단 넣으세요.',
+      };
+    },
+  },
+  {
+    id: 'life',
+    label: '생활 맥락',
+    prompt: () => '주제가 무엇이든 내 일상(퇴근, 육아, 주말)을 배경으로 자연스럽게 깔 것. '
+      + '다만 일상 이야기가 주제를 잡아먹으면 안 됩니다.',
+    enabledWhen: (settings) => Boolean(settings.persona?.enabled),
+    check: (post) => {
+      const found = sentenceSources(post).join(' ').match(LIFE_WORDS) || [];
+      return {
+        ok: found.length >= 2,
+        detail: found.length >= 2
+          ? '내 생활이 배경으로 깔려 있습니다'
+          : '글에 쓰는 사람의 생활이 전혀 안 보입니다. 도입부와 중간에 '
+            + '"애들 재우고 찾아봤다" 같은 내 상황을 한두 군데 넣으세요.',
       };
     },
   },
@@ -194,8 +325,10 @@ export const RULES = [
   {
     id: 'criteria',
     label: '선정 기준',
-    prompt: () => '서두에 "순위·추천을 어떤 기준으로 골랐는지"를 반드시 밝히는 단락을 넣을 것.',
-    enabledWhen: (settings) => settings.post.addCriteria,
+    prompt: () => '서두에 "순위·추천을 어떤 기준으로 골랐는지"를 밝히는 단락을 넣을 것. '
+      + '기준을 고른 이유도 내 상황에 빗대어 설명하세요.',
+    // 일상 정보성 글에까지 '선정 기준' 단락을 강요하면 오히려 딱딱해진다.
+    enabledWhen: (settings, post) => settings.post.addCriteria && post?.shape !== 'general',
     check: (post) => {
       const items = post.criteria?.items || [];
       const body = (post.criteria?.paragraphs || []).join('');
@@ -264,7 +397,7 @@ export const RULES = [
     id: 'opening',
     label: '서두 인사말 금지',
     prompt: () => '"안녕하세요", "이번 포스팅에서는" 같은 인사말이나 메타 안내 문장 없이 '
-      + '바로 독자의 문제 상황에 공감하는 본론으로 시작할 것.',
+      + '바로 근황이나 이 주제를 찾아보게 된 사소한 계기로 시작할 것.',
     check: (post) => {
       const first = String((post.intro || [])[0] || '').trim();
       if (!first) return { ok: false, detail: '도입부가 비어 있습니다.' };
@@ -297,15 +430,19 @@ export const RULES = [
   {
     id: 'closing',
     label: '마무리',
-    prompt: () => '결론에서는 글 전체 내용을 요약하고 독자를 따뜻하게 독려하며 마무리할 것.',
+    prompt: () => '억지로 요약하지 말고 내일 할 일이나 개인적인 다짐으로 덤덤하게 끝낼 것. '
+      + '"이상으로 알아보았습니다", "도움이 되셨길 바랍니다" 같은 영혼 없는 마무리는 금지입니다.',
     check: (post) => {
-      const outro = (post.outro || []).join('');
-      return {
-        ok: outro.replace(/\s+/g, '').length >= 120,
-        detail: outro.replace(/\s+/g, '').length >= 120
-          ? '요약과 독려로 마무리했습니다'
-          : '마무리 단락이 너무 짧습니다. 글 전체를 요약하고 독자를 격려하는 내용을 2문단 이상 쓰세요.',
-      };
+      const outro = (post.outro || []).join(' ');
+      const length = outro.replace(/\s+/g, '').length;
+      // 덤덤한 마무리가 목표라 길이를 많이 요구하지 않는다. 한두 문장이면 충분하다.
+      if (length < 50) {
+        return {
+          ok: false,
+          detail: '마무리가 너무 짧습니다. 내일 할 일이나 다짐으로 한두 문장 더 붙여 자연스럽게 끝내세요.',
+        };
+      }
+      return { ok: true, detail: '덤덤하게 마무리했습니다' };
     },
   },
 ];

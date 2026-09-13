@@ -19,6 +19,14 @@ import { logger } from '../lib/events.js';
 /** 이 개수까지는 항목마다 상세 섹션을 쓴다. 넘어가면 글이 감당이 안 된다. */
 export const ITEM_LIMIT = 12;
 
+/**
+ * "OO 순위" 처럼 개수를 안 밝힌 주제에 잡아줄 기본 표 크기.
+ *
+ * 개수를 안 썼다고 5~6개만 적으면 검색해서 들어온 사람이 바로 나가버린다.
+ * 넉넉하게 잡아두고, 모델이 아는 만큼만 채우게 둔다. (못 채운 행은 버린다)
+ */
+export const DEFAULT_RANK_COUNT = 30;
+
 /** 표 행만 나눠 받을 때 한 번에 요청하는 행 수. */
 const CHUNK_SIZE = 50;
 const MAX_COUNT = 200;
@@ -53,7 +61,11 @@ export function detectCount(topic) {
 export function detectShape(topic) {
   const text = String(topic || '');
   const count = detectCount(text);
-  const rankingWord = /(순위|랭킹|랭크|ranking|rank|top\s*-?\s*\d|베스트|best\s*\d|추천|고르는|비교)/i.test(text);
+
+  // "순위 / 랭킹 / TOP / 베스트" — 개수를 안 밝혀도 목록을 최대한 많이 원하는 주제.
+  const rankWord = /(순위|랭킹|랭크|\branking\b|\brank\b|\btop\s*-?\s*\d*|베스트|\bbest\b)/i.test(text);
+  // "추천 / 비교 / 고르는 법" — 개수보다 설명이 중요한 주제.
+  const pickWord = /(추천|고르는|고르기|비교|선택하는)/.test(text);
 
   if (count && count <= ITEM_LIMIT) {
     return { shape: 'items', count, needsChunking: false };
@@ -61,8 +73,14 @@ export function detectShape(topic) {
   if (count) {
     return { shape: 'table', count, needsChunking: true };
   }
-  // 개수가 없어도 "추천/비교" 성격이면 항목형이 자연스럽다. 개수는 AI 가 정한다.
-  return { shape: rankingWord ? 'items' : 'general', count: null, needsChunking: false };
+  if (rankWord) {
+    // 개수를 안 썼어도 표를 넉넉히 채운다. 자료가 모자라면 채워진 만큼만 남는다.
+    return { shape: 'table', count: DEFAULT_RANK_COUNT, needsChunking: true, openEnded: true };
+  }
+  if (pickWord) {
+    return { shape: 'items', count: null, needsChunking: false };
+  }
+  return { shape: 'general', count: null, needsChunking: false };
 }
 
 function normalizeRows(rawRows, columnCount) {
@@ -97,12 +115,15 @@ function buildChunkPrompt({ topic, headers, start, end, existingNames }) {
   );
 
   return `주제: "${topic}"
-이 주제의 비교표에서 ${start}~${end}번, 정확히 ${expected}개 행을 채우세요.
+이 주제의 비교표에서 ${start}~${end}번, ${expected}개 행을 채우세요.
 
 열: ${headers.join(' | ')}
 
 규칙
-- ${expected}개 행 전부 출력. "이하 생략", "...", "(중략)" 금지.
+- 아는 것을 최대한 끌어모아 ${expected}개를 꽉 채우는 것이 목표입니다. "이하 생략", "...", "(중략)" 금지.
+- 실제로 존재하는 항목의 이름을 쓰세요. 칸을 메우려고 "항목 1", "기타" 같은 가짜 항목을 만들지 마세요.
+- 이 주제에 해당하는 것이 ${expected}개보다 적다면, 아는 만큼만 출력하고 나머지 번호는 빼세요.
+  억지로 지어내는 것보다 적게 나오는 편이 낫습니다.
 - 첫 칸은 번호 숫자만 (${start}~${end}).
 - 각 행은 정확히 ${headers.length}칸, 빈 칸 없이.
 - 각 칸 24자 이내. 특수문자와 이모지는 쓰지 마세요.
@@ -169,7 +190,8 @@ export async function generateTableRows({
     }
     ranges.push([head, prev]);
 
-    for (const [start, end] of ranges) {
+    // 자료가 정말 없어서 비는 경우도 많다. 재요청은 3구간까지만 하고 접는다.
+    for (const [start, end] of ranges.slice(0, 3)) {
       try {
         await fetchRange(start, end);
       } catch (error) {
@@ -184,6 +206,12 @@ export async function generateTableRows({
     const row = byRank.get(rank);
     if (row) rows.push(row);
     else stillMissing.push(rank);
+  }
+
+  // 끝내 못 채운 번호가 있으면 표에 구멍이 생긴다.
+  // 순서는 그대로 두고 번호만 1부터 다시 매겨서 끊김 없이 읽히게 한다.
+  if (stillMissing.length) {
+    rows.forEach((row, index) => { row[0] = String(index + 1); });
   }
 
   // 열을 통째로 비워서 돌려주는 경우가 있어 채움 상태를 짚어둔다.

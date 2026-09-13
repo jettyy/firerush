@@ -209,8 +209,14 @@ function renderSettings() {
   const s = state.settings;
   if (!s) return;
   $('blog-id').value = s.blogId || '';
+  const persona = s.persona || {};
+  $('s-persona').checked = Boolean(persona.enabled);
+  $('s-nickname').value = persona.nickname || '';
+  $('s-identity').value = persona.identity || '';
+  if (document.activeElement !== $('s-life')) $('s-life').value = persona.life || '';
+  if (document.activeElement !== $('s-banned')) $('s-banned').value = persona.banned || '';
+  $('s-voice').value = s.post.voice || 'monologue';
   $('s-tone').value = s.post.tone;
-  $('s-formal').checked = Boolean(s.post.formalEnding);
   $('s-chars').value = s.post.minChars;
   $('s-sections').value = s.post.sectionCount;
   $('s-audience').value = s.post.audience;
@@ -302,9 +308,16 @@ function collectSettings() {
   return {
     blogId: $('blog-id').value.trim(),
     claude: { model },
+    persona: {
+      enabled: $('s-persona').checked,
+      nickname: $('s-nickname').value.trim(),
+      identity: $('s-identity').value.trim(),
+      life: $('s-life').value.trim(),
+      banned: $('s-banned').value.trim(),
+    },
     post: {
+      voice: $('s-voice').value,
       tone: $('s-tone').value,
-      formalEnding: $('s-formal').checked,
       minChars: Number($('s-chars').value),
       sectionCount: Number($('s-sections').value),
       audience: $('s-audience').value,
