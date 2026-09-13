@@ -314,22 +314,47 @@ export async function runClaudeJson(prompt, options = {}) {
   }
 }
 
-/** CLI 가 설치·로그인되어 있는지 확인. */
-export async function checkClaude() {
+/**
+ * CLI 가 설치·로그인되어 있는지 확인.
+ *
+ * 시간 제한이 꼭 있어야 한다. claude 가 무언가를 기다리며 멈추면 이 약속이
+ * 영영 안 풀리고, 그걸 기다리는 /api/health 도 같이 멈춘다.
+ * 그러면 화면 배지가 "확인 중" 에서 굳은 채로 아무 설명도 안 나온다.
+ */
+export async function checkClaude(timeoutMs = 15000) {
   const settings = getSettings();
   const command = settings.claude.command || 'claude';
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
     const child = spawn(command, ['--version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: IS_WINDOWS,
       windowsHide: true,
     });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      done({
+        ok: false,
+        version: '',
+        message: `claude --version 이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았습니다. `
+          + '터미널에서 claude 를 직접 실행해 로그인 상태를 확인해 주세요.',
+      });
+    }, timeoutMs);
+
     const chunks = [];
     child.stdout.on('data', (c) => chunks.push(c));
-    child.on('error', () => resolve({ ok: false, version: '', message: 'claude CLI 를 찾을 수 없습니다.' }));
+    child.on('error', () => done({ ok: false, version: '', message: 'claude CLI 를 찾을 수 없습니다.' }));
     child.on('close', (code) => {
-      if (code === 0) resolve({ ok: true, version: decodeOutput(chunks).trim(), message: '' });
-      else resolve({ ok: false, version: '', message: `claude --version 종료 코드 ${code}` });
+      if (code === 0) done({ ok: true, version: decodeOutput(chunks).trim(), message: '' });
+      else done({ ok: false, version: '', message: `claude --version 종료 코드 ${code}` });
     });
   });
 }

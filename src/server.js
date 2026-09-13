@@ -47,9 +47,18 @@ app.get('/api/state', wrap(async (req, res) => {
 
 app.get('/api/health', wrap(async (req, res) => {
   const claude = await checkClaude();
+
+  // 크로미움을 처음 받는 중이면 오래 걸린다. 그래도 무한정 붙잡아 두지는 않는다.
+  // 이 요청이 안 끝나면 화면 배지가 "확인 중" 에서 굳는다.
   let browser = { ok: true, message: '' };
   try {
-    await ensureBrowsers();
+    await Promise.race([
+      ensureBrowsers(),
+      new Promise((resolve, reject) => setTimeout(
+        () => reject(new Error('크로미움 준비가 아직 끝나지 않았습니다. 잠시 뒤 새로고침해 주세요.')),
+        170000,
+      )),
+    ]);
   } catch (error) {
     browser = { ok: false, message: error.message };
   }

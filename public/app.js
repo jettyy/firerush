@@ -18,15 +18,47 @@ let state = { settings: null, session: null, jobs: [], runner: null, models: [],
 /* ---------- 공통 ---------- */
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    method: options.method || 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  // 서버가 대답을 못 하면 버튼이 영원히 멈춰 있는 것처럼 보인다. 끊고 알린다.
+  const timeoutMs = options.timeoutMs || 20000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(path, {
+      method: options.method || 'GET',
+      headers: options.body ? { 'Content-Type': 'application/json' } : {},
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`서버가 ${Math.round(timeoutMs / 1000)}초 안에 응답하지 않았습니다 (${path}). `
+        + '서버를 띄운 터미널 창을 확인해 주세요.');
+    }
+    throw new Error(`서버에 연결하지 못했습니다 (${path}). 서버가 꺼져 있는지 확인해 주세요.`);
+  } finally {
+    clearTimeout(timer);
+  }
+
   const data = await res.json().catch(() => ({ ok: false, message: '응답을 읽지 못했습니다.' }));
   if (!res.ok || data.ok === false) throw new Error(data.message || `요청 실패 (${res.status})`);
   return data;
 }
+
+/**
+ * 버튼 핸들러 대부분이 try/catch 없이 await 만 하고 있었다.
+ * 요청이 실패하면 아무 반응 없이 조용히 끝나서 "버튼이 안 먹힌다" 로 보인다.
+ * 핸들러를 하나씩 고치는 대신 전역에서 붙잡아 화면에 띄운다.
+ */
+window.addEventListener('unhandledrejection', (event) => {
+  const message = event.reason?.message || String(event.reason || '알 수 없는 오류');
+  toast(`오류: ${message}`);
+  console.error('처리되지 않은 오류:', event.reason);
+});
+window.addEventListener('error', (event) => {
+  toast(`화면 오류: ${event.message}`);
+});
 
 let toastTimer = null;
 function toast(message) {
@@ -281,7 +313,12 @@ function connectStream() {
     else if (type === 'examples') { state.examples = payload; renderExamples(); }
     else if (type === 'session') { state.session = payload; renderSession(); refreshState(); }
   };
-  source.onerror = () => { /* EventSource 가 알아서 재접속한다. */ };
+  // EventSource 가 알아서 재접속하지만, 서버가 죽으면 화면이 조용히 멈춘 것처럼 보인다.
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) {
+      toast('서버와 연결이 끊겼습니다. 서버를 띄운 터미널 창을 확인해 주세요.');
+    }
+  };
 }
 
 /* ---------- 초기화 ---------- */
@@ -310,7 +347,17 @@ async function boot() {
   $('console').innerHTML = '';
   (data.logs || []).forEach(appendLog);
   connectStream();
-  api('/api/health').then(renderPills).catch(() => {});
+  // 브라우저를 처음 받는 중이면 오래 걸린다. 넉넉히 기다리되, 실패하면 배지에 드러낸다.
+  // 조용히 삼키면 "확인 중" 에 영원히 멈춰 있어서 뭐가 잘못됐는지 알 수가 없다.
+  api('/api/health', { timeoutMs: 180000 })
+    .then(renderPills)
+    .catch((error) => {
+      for (const id of ['pill-claude', 'pill-browser']) {
+        $(id).textContent = '확인 실패';
+        $(id).className = 'pill bad';
+      }
+      toast(`상태 확인 실패: ${error.message}`);
+    });
   setInterval(renderRunner, 1000);
 }
 

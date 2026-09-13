@@ -136,6 +136,20 @@ await check('buildRuleBlock', () => quality.buildRuleBlock(DEFAULT_SETTINGS, 'ta
   v.includes('[분량]') ? '' : '규칙 목록이 비었음'
 ));
 
+/* 3. 화면이 찾는 요소가 실제로 있는지 (버튼이 죽는 가장 흔한 원인) */
+{
+  // 위쪽의 html 모듈과 이름이 겹치지 않게 따로 짓는다.
+  const indexHtml = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
+  const appJs = fs.readFileSync(path.join(ROOT, 'public/app.js'), 'utf8');
+  const ids = new Set([...indexHtml.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const wanted = new Set([...appJs.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
+  for (const id of wanted) {
+    if (!ids.has(id)) {
+      failures.push(`app.js 가 $('${id}') 를 찾는데 index.html 에 그 요소가 없습니다`);
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`\n검사 실패 ${failures.length}건\n`);
   failures.forEach((line) => console.error(`  - ${line}`));
